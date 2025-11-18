@@ -1,0 +1,30 @@
+/**
+ * SPDX-FileCopyrightText: (C) 2025 Siemens
+ * SPDX-License-Identifier: LGPL-2.1-or-later
+ */
+
+#include <babeltrace2/babeltrace.h>
+#include <event-parse.h>
+
+/**
+ * LTTng events are named after their lttng kernel tracepoints, but we have
+ * names from the kernels tracefs. Map them for well-known events. Usually,
+ * that is just the event name without the event system.
+ */
+const char *lttng_get_event_name_from_event(const struct tep_event *event);
+
+/**
+ * Some event fields are named differently in LTTng. Examples are pid / tid,
+ * whereby the kernel uses pid and LTTng consistently uses tid.
+ */
+const char *lttng_get_field_name_from_event(const struct tep_event *event,
+											const char *field_name);
+
+/**
+ * Some event values are different on LTTng and the kernel trace. Examples are
+ * the prio fields, whereby LTTng's priorities refer to the ones observed from
+ * userspace.
+ */
+unsigned long long lttng_get_field_val_from_event(const struct tep_event *event,
+												  const char *field_name,
+												  unsigned long long val);

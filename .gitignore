@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: (C) 2025 Siemens
+/.vscode
+/build*
