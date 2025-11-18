@@ -12,11 +12,13 @@
 #include <unistd.h>
 #include <string.h>
 #include <stdbool.h>
+#include <stdlib.h>
 
 /* Structure that holds the parsed options */
 typedef struct {
 	bool lttng;
 	char *ctf_version;
+	uint64_t clock_offset;
 	int mip;
 	char *trace_path;
 	char *out_dir;
@@ -31,6 +33,7 @@ static void print_usage(char *prog_name)
 		"Options:\n"
 		"  -c, --ctf-version <v> CTF version to use (default: 1.8)\n"
 		"  -l, --lttng           Convert well-known events to LTTng representation (default: off)\n"
+		"  -o, --clock-offset <offset> Trace clock offset in ns to world clock\n"
 		"  -h, --help            Show this help message and exit\n",
 		basename(prog_name));
 }
@@ -61,12 +64,14 @@ int parse_args(int argc, char *argv[], prog_opts *opts)
 	opts->ctf_version = "1.8";
 	opts->mip = 0;
 	opts->lttng = false;
+	opts->clock_offset = 0;
 	opts->trace_path = NULL;
 	opts->out_dir = NULL;
 
 	// clang-format off
 	static const struct option long_opts[] = {
 		{ "ctf-version", required_argument, 0 , 'c'},
+		{ "clock-offset", required_argument, 0, 'o'},
 		{ "lttng",       no_argument,       0, 'l' },
 		{ "help",        no_argument,       0, 'h' },
 		{ 0,             0,                 0,  0  }
@@ -76,7 +81,7 @@ int parse_args(int argc, char *argv[], prog_opts *opts)
 	int opt;
 	int opt_index = 0;
 
-	while ((opt = getopt_long(argc, argv, "c:lh", long_opts, &opt_index)) !=
+	while ((opt = getopt_long(argc, argv, "c:lho:", long_opts, &opt_index)) !=
 		   -1) {
 		switch (opt) {
 		case 'c':
@@ -84,6 +89,9 @@ int parse_args(int argc, char *argv[], prog_opts *opts)
 			break;
 		case 'l':
 			opts->lttng = true;
+			break;
+		case 'o':
+			opts->clock_offset = strtoull(optarg, NULL, 10);
 			break;
 		case 'h': /* fall‑through */
 		case '?': /* unknown option */
@@ -158,6 +166,7 @@ int main(int argc, char **argv)
 	printf("Options parsed:\n");
 	printf("  lttng :       %s\n", opts.lttng ? "yes" : "no");
 	printf("  ctf-version : %s\n", opts.ctf_version);
+	printf("  clock-offset: %lu\n", opts.clock_offset);
 	printf("  trace   :     %s\n", opts.trace_path);
 	printf("  outdir  :     %s\n", opts.out_dir);
 
@@ -191,6 +200,8 @@ int main(int argc, char **argv)
 	bt_value_map_insert_empty_array_entry(source_params, "inputs", &inputs);
 	bt_value_array_append_string_element(inputs, opts.trace_path);
 	bt_value_map_insert_bool_entry(source_params, "lttng", opts.lttng);
+	bt_value_map_insert_unsigned_integer_entry(source_params, "clock-offset",
+											   opts.clock_offset);
 	bt_graph_add_source_component(graph, source_cls, "ftrace", source_params,
 								  BT_LOGGING_LEVEL_WARNING, &source);
 	bt_value_put_ref(source_params);
