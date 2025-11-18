@@ -1,0 +1,65 @@
+# SPDX-FileCopyrightText: Copyright 2025 Siemens AG
+#
+# SPDX-License-Identifier: MIT
+
+name: build bt2-ftrace-to-ctf
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+# Sets permissions of the GITHUB_TOKEN to checkout the repository
+permissions:
+  contents: read
+
+jobs:
+  reuse-and-codestyle:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: install dependencies
+        run: |
+          pip3 install --break-system-packages fsfe-reuse
+          git clean -f -d
+
+      - name: execute linters
+        run: |
+          reuse lint
+
+  build:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        distro:
+          ["debian:bookworm", "debian:trixie", "debian:forky", "ubuntu:noble"]
+    container: ${{ matrix.distro }}
+    steps:
+      - name: checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: install dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential \
+            ninja-build \
+            meson \
+            libbabeltrace2-dev \
+            libtraceevent-dev \
+            libtracecmd-dev \
+            libtracefs-dev \
+            libglib2.0-dev
+
+      - name: build components
+        run: |
+          meson setup -Dbuildtype=debugoptimized build
+          cd build && ninja
