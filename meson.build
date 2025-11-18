@@ -6,7 +6,7 @@ project(
   'c',
   version : '0.1.0',
   default_options : [
-    'c_std=c23',
+    'c_std=gnu11',
     'warning_level=3',
   ]
 )
@@ -15,6 +15,12 @@ glib_dep = dependency('glib-2.0')
 traceevent_dep = dependency('libtraceevent')
 tracecmd_dep = dependency('libtracecmd')
 babeltrace2_dep = dependency('babeltrace2')
+bt2_dep_version = babeltrace2_dep.version().split('.')
+add_project_arguments(
+  '-DBT2_VERSION_MINOR=' + bt2_dep_version[1],
+  language : 'c'
+)
+
 
 bt2_ftrace_plugin = shared_library('babeltrace-plugin-ftrace',
   sources: files(
