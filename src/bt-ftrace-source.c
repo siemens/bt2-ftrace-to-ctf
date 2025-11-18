@@ -183,7 +183,9 @@ static void create_metadata_and_stream(bt_self_component *self_component,
 	bt_clock_class *clock_class = bt_clock_class_create(self_component);
 	bt_clock_class_set_name(clock_class, "monotonic");
 	bt_clock_class_set_description(clock_class, "Monotonic Clock");
+#if BT2_VERSION_MINOR >= 1
 	bt_clock_class_set_origin_unknown(clock_class);
+#endif
 
 	/*
 	 * Set `clock_class` as the default clock class of `stream_class`.
@@ -232,9 +234,11 @@ static void create_metadata_and_stream(bt_self_component *self_component,
 	/* Create a default trace from (instance of `trace_class`) */
 	bt_trace *trace = bt_trace_create(trace_class);
 	sprintf(NAME_BUF, "%llu", tracecmd_get_traceid(ftrace_in->tc_input));
+#if BT2_VERSION_MINOR >= 1
 	if (mip_version >= 2) {
 		bt_trace_set_uid(trace, NAME_BUF);
 	}
+#endif
 	/* TODO: make trace name configurable */
 	bt_trace_set_name(trace, "global-kernel-session");
 	bt_trace_set_environment_entry_string(trace, "domain", "kernel");
