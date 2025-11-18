@@ -17,6 +17,7 @@ The plugin uses the following initialization parameters:
 
 - "inputs": array of string, mandatory: providing exactly one input file path
 - "lttng": boolean, optional: indicating if LTTng semantics shall be used
+- "clock-offset": uint64, optional: trace clock offset from world clock in ns
 
 The plugin further implements the following query interfaces:
 
@@ -26,7 +27,7 @@ The plugin further implements the following query interfaces:
 **Example:**
 
 ```bash
-trace-cmd record -C global -e "sched:sched_switch" sleep 1
+trace-cmd record -C mono -e "sched:sched_switch" sleep 1
 babeltrace2 --plugin-path=. trace.dat
 ```
 

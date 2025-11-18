@@ -8,9 +8,10 @@
  * 
  * "inputs": array of string, mandatory: providing exactly one input file path
  * "lttng": boolean, optional: indicating if LTTng semantics shall be used
+ * "clock-offset": uint64, optional: trace clock offset from world clock in ns
  *
  * Example:
- *   trace-cmd record -e "sched:sched_switch" sleep 1
+ *   trace-cmd record -C mono -e "sched:sched_switch" sleep 1
  *   babeltrace2 --plugin-path=. trace.dat
  * 
  * Query babeltrace.trace-infos:
@@ -37,6 +38,8 @@
 /* currently an arbitrary number, but helps to test the next package code path */
 #define MAX_EVENTS_PER_PACKET 1024
 
+#define NS_PER_S (1000 * 1000 * 1000)
+
 /* ports private data */
 struct port_in {
 	int cpu_id;
@@ -53,6 +56,9 @@ struct ftrace_in {
 
 	/* use LTTng event names and semantics on well-known events */
 	bt_bool lttng_format;
+
+	/* clock offset to world clock in ns */
+	uint64_t clock_offset_ns;
 
 	/* Streams (owned by this) */
 	bt_stream **streams;
@@ -183,6 +189,9 @@ static void create_metadata_and_stream(bt_self_component *self_component,
 	bt_clock_class *clock_class = bt_clock_class_create(self_component);
 	bt_clock_class_set_name(clock_class, "monotonic");
 	bt_clock_class_set_description(clock_class, "Monotonic Clock");
+	bt_clock_class_set_offset(clock_class,
+							  ftrace_in->clock_offset_ns / NS_PER_S,
+							  ftrace_in->clock_offset_ns % NS_PER_S);
 #if BT2_VERSION_MINOR >= 1
 	bt_clock_class_set_origin_unknown(clock_class);
 #endif
@@ -299,6 +308,12 @@ ftrace_in_initialize(bt_self_component_source *self_component_source,
 		bt_value_map_borrow_entry_value_const(params, "lttng");
 	if (lttng_val) {
 		ftrace_in->lttng_format = bt_value_bool_get(lttng_val);
+	}
+	const bt_value *clock_of_val =
+		bt_value_map_borrow_entry_value_const(params, "clock-offset");
+	if (clock_of_val) {
+		ftrace_in->clock_offset_ns =
+			bt_value_integer_unsigned_get(clock_of_val);
 	}
 
 	ftrace_in->tc_input = tracecmd_open(path, TRACECMD_FL_LOAD_NO_PLUGINS);
