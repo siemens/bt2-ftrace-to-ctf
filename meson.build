@@ -24,10 +24,13 @@ add_project_arguments(
 
 bt2_ftrace_plugin = shared_library('babeltrace-plugin-ftrace',
   sources: files(
-    'src/bt-ftrace-source.c', 
-    'src/bt-ftrace-lttng-events.c', 
+    'src/bt-ftrace-logging.h',
+    'src/bt-ftrace-lttng-events.c',
     'src/bt-ftrace-lttng-events.h',
-    'src/bt-ftrace-logging.h'),
+    'src/bt-ftrace-plugin.c',
+    'src/bt-ftrace-source.c',
+    'src/bt-ftrace-source.h',
+    ),
   c_args: ['-Wno-unused-parameter'],
   gnu_symbol_visibility: 'hidden',
   name_prefix: '',
