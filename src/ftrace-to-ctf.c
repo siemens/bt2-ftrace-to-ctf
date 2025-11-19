@@ -6,6 +6,7 @@
  * trace.dat) to CTF.
  */
 #include <babeltrace2/babeltrace.h>
+#include <json-glib/json-glib.h>
 #include <libgen.h>
 #include <stdio.h>
 #include <getopt.h>
@@ -13,14 +14,17 @@
 #include <string.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <uuid.h>
 
 /* Structure that holds the parsed options */
 typedef struct {
 	bool lttng;
 	char *ctf_version;
 	uint64_t clock_offset;
+	char *clock_uid;
 	int mip;
 	char *trace_path;
+	char *lttng_path;
 	char *out_dir;
 } prog_opts;
 
@@ -28,12 +32,13 @@ static void print_usage(char *prog_name)
 {
 	fprintf(
 		stderr,
-		"Usage: %s [-clh] <trace.dat> <outdir>\n"
+		"Usage: %s [-clh] <trace.dat> [<lttng-trace>] <outdir>\n"
 		"\n"
 		"Options:\n"
 		"  -c, --ctf-version <v> CTF version to use (default: 1.8)\n"
 		"  -l, --lttng           Convert well-known events to LTTng representation (default: off)\n"
 		"  -o, --clock-offset <offset> Trace clock offset in ns to world clock\n"
+		"  -u, --clock-uid <(u)uid> Trace clock uuid or uid, depending on MIP version\n"
 		"  -h, --help            Show this help message and exit\n",
 		basename(prog_name));
 }
@@ -65,13 +70,16 @@ int parse_args(int argc, char *argv[], prog_opts *opts)
 	opts->mip = 0;
 	opts->lttng = false;
 	opts->clock_offset = 0;
+	opts->clock_uid = NULL;
 	opts->trace_path = NULL;
+	opts->lttng_path = NULL;
 	opts->out_dir = NULL;
 
 	// clang-format off
 	static const struct option long_opts[] = {
 		{ "ctf-version", required_argument, 0 , 'c'},
 		{ "clock-offset", required_argument, 0, 'o'},
+		{ "clock-uid",   required_argument, 0, 'u' },
 		{ "lttng",       no_argument,       0, 'l' },
 		{ "help",        no_argument,       0, 'h' },
 		{ 0,             0,                 0,  0  }
@@ -81,7 +89,7 @@ int parse_args(int argc, char *argv[], prog_opts *opts)
 	int opt;
 	int opt_index = 0;
 
-	while ((opt = getopt_long(argc, argv, "c:lho:", long_opts, &opt_index)) !=
+	while ((opt = getopt_long(argc, argv, "c:lho:u:", long_opts, &opt_index)) !=
 		   -1) {
 		switch (opt) {
 		case 'c':
@@ -92,6 +100,9 @@ int parse_args(int argc, char *argv[], prog_opts *opts)
 			break;
 		case 'o':
 			opts->clock_offset = strtoull(optarg, NULL, 10);
+			break;
+		case 'u':
+			opts->clock_uid = strdup(optarg);
 			break;
 		case 'h': /* fall‑through */
 		case '?': /* unknown option */
@@ -106,16 +117,21 @@ int parse_args(int argc, char *argv[], prog_opts *opts)
 
 	/* After option processing, the remaining arguments are positional */
 	int positional_left = argc - optind;
-	if (positional_left != 2) {
+	if (positional_left < 2 || positional_left > 3) {
 		fprintf(stderr,
-				"Error: expected exactly two positional arguments, got %d.\n",
+				"Error: expected two or three positional arguments, got %d.\n",
 				positional_left);
 		print_usage(argv[0]);
 		return 1;
 	}
 
 	opts->trace_path = argv[optind];
-	opts->out_dir = argv[optind + 1];
+	if (positional_left == 3) {
+		opts->lttng_path = argv[optind + 1];
+		opts->out_dir = argv[optind + 2];
+	} else {
+		opts->out_dir = argv[optind + 1];
+	}
 
 	/* Sanity check inputs */
 	if (!check_ctf_version(opts->ctf_version, &opts->mip)) {
@@ -151,9 +167,165 @@ const bt_plugin *load_plugin_by_name(char *name)
 	return NULL;
 }
 
+/* Parse the clock definitions emitted by sink.ftrace.tracemeta */
+static int parse_clock_meta(const char *buffer, int64_t *offset_s,
+							uint64_t *offset_c, uint64_t *freq, char **uid)
+{
+	JsonParser *parser = json_parser_new();
+	GError *error = NULL;
+
+	if (!json_parser_load_from_data(parser, buffer, -1, &error)) {
+		g_printerr("Failed to parse JSON: %s\n", error->message);
+		g_error_free(error);
+		g_object_unref(parser);
+		return -1;
+	}
+
+	JsonNode *root = json_parser_get_root(parser);
+	JsonObject *root_o = json_node_get_object(root);
+
+	if (!json_object_has_member(root_o, "clock")) {
+		g_printerr("JSON object does not contain a \"clock\" member.\n");
+		g_object_unref(parser);
+		return -1;
+	}
+
+	JsonObject *clock_o = json_object_get_object_member(root_o, "clock");
+
+	if (!json_object_has_member(clock_o, "offset_s") ||
+		!json_object_has_member(clock_o, "offset_c") ||
+		!json_object_has_member(clock_o, "frequency") ||
+		!(json_object_has_member(clock_o, "uid") |
+		  json_object_has_member(clock_o, "uuid"))) {
+		g_printerr("\"clock\" object is missing one of the required fields.\n");
+		g_object_unref(parser);
+		return -1;
+	}
+
+	*offset_s = (guint64)json_object_get_int_member(clock_o, "offset_s");
+	*offset_c = (guint64)json_object_get_int_member(clock_o, "offset_c");
+	*freq = (guint64)json_object_get_int_member(clock_o, "frequency");
+	const char *uid_str =
+		json_object_get_string_member_with_default(clock_o, "uid", "");
+	if (*uid_str) {
+		*uid = strdup(uid_str);
+	} else {
+		/* Either uid or uuid must be set, so we can be sure to have it */
+		const char *uuid_str = json_object_get_string_member(clock_o, "uuid");
+		*uid = strdup(uuid_str);
+	}
+
+	g_object_unref(parser);
+	return 0;
+}
+
+/**
+ * Create a babeltrace graph with the sink.ftrace.tracemeta component to
+ * extract the clock definition of a stream (e.g. from a LTTng US CTF file).
+ * Only a single iteration of the graph is executed as we just need a single
+ * clock definition. Once we have it, we return it to the caller so that he
+ * can create the clock accordingly.
+ * 
+ * Internally, the output of the sink is passed via a anonymous pipe.
+ * 
+ * Note: This parser needs to be kept in sync with the generator in
+ * sink.ftrace.tracemeta.
+ */
+static int get_clock_offset_from_lttng_trace(const bt_plugin *ftrace_plugin,
+											 const bt_plugin *ctf_plugin,
+											 const bt_plugin *utils_plugin,
+											 prog_opts *opts)
+{
+	const bt_component_source *source;
+	const bt_component_filter *filter;
+	const bt_component_sink *sink;
+	int out_fds[2];
+	int64_t offset_s;
+	uint64_t offset_c, freq;
+	char *clock_uid = NULL;
+
+	const bt_component_class_source *source_cls =
+		bt_plugin_borrow_source_component_class_by_name_const(ctf_plugin, "fs");
+	const bt_component_class_filter *filter_cls =
+		bt_plugin_borrow_filter_component_class_by_name_const(utils_plugin,
+															  "muxer");
+
+	const bt_component_class_sink *sink_cls =
+		bt_plugin_borrow_sink_component_class_by_name_const(ftrace_plugin,
+															"tracemeta");
+
+	/* prepare in-memory file for output */
+	pipe(out_fds);
+
+	/* Construct graph */
+	bt_graph *graph = bt_graph_create(opts->mip);
+
+	/* add components */
+	bt_value *inputs;
+	bt_value *comp_params = bt_value_map_create();
+	bt_value_map_insert_empty_array_entry(comp_params, "inputs", &inputs);
+	bt_value_array_append_string_element(inputs, opts->lttng_path);
+	bt_graph_add_source_component(graph, source_cls, "lttng", comp_params,
+								  BT_LOGGING_LEVEL_WARNING, &source);
+	bt_value_put_ref(comp_params);
+
+	bt_graph_add_filter_component(graph, filter_cls, "muxer", NULL,
+								  BT_LOGGING_LEVEL_WARNING, &filter);
+
+	comp_params = bt_value_map_create();
+	bt_value_map_insert_signed_integer_entry(comp_params, "outfd", out_fds[1]);
+
+	bt_graph_add_sink_component(graph, sink_cls, "tracemeta", comp_params,
+								BT_LOGGING_LEVEL_WARNING, &sink);
+	bt_value_put_ref(comp_params);
+
+	/* plumbing */
+	const uint64_t nb_out_ports =
+		bt_component_source_get_output_port_count(source);
+	for (uint64_t i = 0; i < nb_out_ports; ++i) {
+		const bt_port_output *s_out =
+			bt_component_source_borrow_output_port_by_index_const(source, i);
+		const bt_port_input *f_in =
+			bt_component_filter_borrow_input_port_by_index_const(filter, i);
+		bt_graph_connect_ports(graph, s_out, f_in, NULL);
+	}
+	const bt_port_output *f_out =
+		bt_component_filter_borrow_output_port_by_index_const(filter, 0);
+	const bt_port_input *s_in =
+		bt_component_sink_borrow_input_port_by_index_const(sink, 0);
+	bt_graph_connect_ports(graph, f_out, s_in, NULL);
+
+	/* execute (we are interested in a single stream-beginning message)*/
+	bt_graph_run_once(graph);
+	/* TODO: check status */
+	BT_GRAPH_PUT_REF_AND_RESET(graph);
+	/* close writer end */
+	close(out_fds[1]);
+
+	FILE *fp = fdopen(out_fds[0], "r");
+	if (!fp) {
+		close(out_fds[0]);
+		return -1;
+	}
+
+	char *line = NULL;
+	size_t len = 0;
+	ssize_t nb = getline(&line, &len, fp);
+	line[nb] = '\0';
+	int ok = parse_clock_meta(line, &offset_s, &offset_c, &freq, &clock_uid);
+	if (ok == 0) {
+		opts->clock_offset = offset_s * freq + offset_c;
+		opts->clock_uid = clock_uid;
+	}
+	free(line);
+	fclose(fp);
+	return ok;
+}
+
 int main(int argc, char **argv)
 {
 	const bt_component_source *source = NULL;
+	const bt_component_source *source_lttng = NULL;
 	const bt_component_filter *filter = NULL;
 	const bt_component_sink *sink = NULL;
 
@@ -166,8 +338,11 @@ int main(int argc, char **argv)
 	printf("Options parsed:\n");
 	printf("  lttng :       %s\n", opts.lttng ? "yes" : "no");
 	printf("  ctf-version : %s\n", opts.ctf_version);
-	printf("  clock-offset: %lu\n", opts.clock_offset);
+	if (opts.clock_offset)
+		printf("  clock-offset: %lu\n", opts.clock_offset);
 	printf("  trace   :     %s\n", opts.trace_path);
+	printf("  lttng-trace:  %s\n",
+		   opts.lttng_path ? opts.lttng_path : "not provided");
 	printf("  outdir  :     %s\n", opts.out_dir);
 
 	const bt_plugin *ftrace_plugin = load_plugin_by_name("ftrace");
@@ -182,9 +357,24 @@ int main(int argc, char **argv)
 	if (!ctf_plugin)
 		return -1;
 
+	/* only get clock offset if not explicitly provided */
+	if (opts.lttng_path && !opts.clock_offset) {
+		get_clock_offset_from_lttng_trace(ftrace_plugin, ctf_plugin,
+										  utils_plugin, &opts);
+		printf("  clock-offset: %lu (from CTF trace)\n", opts.clock_offset);
+		printf("  clock-uid:    %s (from CTF trace)\n", opts.clock_uid);
+	}
+	/* TODO: check and handle errors */
+
 	const bt_component_class_source *source_cls =
 		bt_plugin_borrow_source_component_class_by_name_const(ftrace_plugin,
 															  "tracedat");
+	const bt_component_class_source *source_lttng_cls;
+	if (opts.lttng_path) {
+		source_lttng_cls =
+			bt_plugin_borrow_source_component_class_by_name_const(ctf_plugin,
+																  "fs");
+	}
 
 	const bt_component_class_filter *filter_cls =
 		bt_plugin_borrow_filter_component_class_by_name_const(utils_plugin,
@@ -202,9 +392,25 @@ int main(int argc, char **argv)
 	bt_value_map_insert_bool_entry(source_params, "lttng", opts.lttng);
 	bt_value_map_insert_unsigned_integer_entry(source_params, "clock-offset",
 											   opts.clock_offset);
+	if (opts.clock_uid) {
+		bt_value_map_insert_string_entry(source_params, "clock-uid",
+										 opts.clock_uid);
+	}
 	bt_graph_add_source_component(graph, source_cls, "ftrace", source_params,
 								  BT_LOGGING_LEVEL_WARNING, &source);
 	bt_value_put_ref(source_params);
+	free(opts.clock_uid);
+
+	/* optional lttng trace input */
+	if (opts.lttng_path) {
+		source_params = bt_value_map_create();
+		bt_value_map_insert_empty_array_entry(source_params, "inputs", &inputs);
+		bt_value_array_append_string_element(inputs, opts.lttng_path);
+		bt_graph_add_source_component(graph, source_lttng_cls, "lttng",
+									  source_params, BT_LOGGING_LEVEL_WARNING,
+									  &source_lttng);
+		bt_value_put_ref(source_params);
+	}
 
 	bt_graph_add_filter_component(graph, filter_cls, "muxer", NULL,
 								  BT_LOGGING_LEVEL_WARNING, &filter);
@@ -225,6 +431,20 @@ int main(int argc, char **argv)
 		const bt_port_input *f_in =
 			bt_component_filter_borrow_input_port_by_index_const(filter, i);
 		bt_graph_connect_ports(graph, ft_out, f_in, NULL);
+	}
+	/* plumbing of optional lttng source */
+	if (opts.lttng_path) {
+		const uint64_t nb_lttng_ports =
+			bt_component_source_get_output_port_count(source_lttng);
+		for (uint64_t i = 0; i < nb_lttng_ports; ++i) {
+			const bt_port_output *lttng_out =
+				bt_component_source_borrow_output_port_by_index_const(
+					source_lttng, i);
+			const bt_port_input *f_in =
+				bt_component_filter_borrow_input_port_by_index_const(
+					filter, i + nb_ft_ports);
+			bt_graph_connect_ports(graph, lttng_out, f_in, NULL);
+		}
 	}
 
 	const bt_port_output *f_out =

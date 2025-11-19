@@ -73,6 +73,8 @@ The resulting trace can be opened with tracecompass as LTTng kernel trace.
 ```bash
 export BABELTRACE_PLUGIN_PATH=$(pwd)
 ./ftrace-to-ctf --lttng trace.dat /tmp/traceout
+# combine an ftrace with a LTTng US trace
+./ftrace-to-ctf --lttng trace.dat /path/to/lttng-us/trace /tmp/traceout
 ```
 
 ## Licenses

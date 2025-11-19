@@ -53,6 +53,6 @@ bt2_ftrace_plugin = shared_library('babeltrace-plugin-ftrace',
 executable('ftrace-to-ctf',
   sources: files('src/ftrace-to-ctf.c'),
   install: true,
-  dependencies: [tracecmd_dep, traceevent_dep, babeltrace2_dep],
+  dependencies: [tracecmd_dep, traceevent_dep, babeltrace2_dep, json_glib_dep, uuid_dep],
   link_with: bt2_ftrace_plugin
 )
