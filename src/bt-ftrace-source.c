@@ -9,6 +9,7 @@
  * "inputs": array of string, mandatory: providing exactly one input file path
  * "lttng": boolean, optional: indicating if LTTng semantics shall be used
  * "clock-offset": uint64, optional: trace clock offset from world clock in ns
+ * "clock-uid": string, optional: UID or UUID of the trace clock
  *
  * Example:
  *   trace-cmd record -C mono -e "sched:sched_switch" sleep 1
@@ -33,6 +34,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <trace-cmd.h>
+#include <uuid.h>
 
 #define USE_PACKAGES 1
 /* currently an arbitrary number, but helps to test the next package code path */
@@ -59,6 +61,7 @@ struct ftrace_in {
 
 	/* clock offset to world clock in ns */
 	uint64_t clock_offset_ns;
+	char *clock_uid;
 
 	/* Streams (owned by this) */
 	bt_stream **streams;
@@ -189,12 +192,28 @@ static void create_metadata_and_stream(bt_self_component *self_component,
 	bt_clock_class *clock_class = bt_clock_class_create(self_component);
 	bt_clock_class_set_name(clock_class, "monotonic");
 	bt_clock_class_set_description(clock_class, "Monotonic Clock");
-	bt_clock_class_set_offset(clock_class,
-							  ftrace_in->clock_offset_ns / NS_PER_S,
-							  ftrace_in->clock_offset_ns % NS_PER_S);
+	/* make the clock compatible with an LTTng US clock definition */
+	if (ftrace_in->clock_offset_ns) {
+		bt_clock_class_set_offset(clock_class,
+								  ftrace_in->clock_offset_ns / NS_PER_S,
+								  ftrace_in->clock_offset_ns % NS_PER_S);
+		bt_clock_class_origin_is_unix_epoch(clock_class);
+	} else {
 #if BT2_VERSION_MINOR >= 1
-	bt_clock_class_set_origin_unknown(clock_class);
+		bt_clock_class_set_origin_unknown(clock_class);
 #endif
+	}
+	if (ftrace_in->clock_uid) {
+		uuid_t clock_uuid;
+		if (mip_version == 0) {
+			uuid_parse(ftrace_in->clock_uid, clock_uuid);
+			bt_clock_class_set_uuid(clock_class, clock_uuid);
+		} else {
+#if BT2_VERSION_MINOR >= 1
+			bt_clock_class_set_uid(clock_class, ftrace_in->clock_uid);
+#endif
+		}
+	}
 
 	/*
 	 * Set `clock_class` as the default clock class of `stream_class`.
@@ -315,6 +334,11 @@ ftrace_in_initialize(bt_self_component_source *self_component_source,
 		ftrace_in->clock_offset_ns =
 			bt_value_integer_unsigned_get(clock_of_val);
 	}
+	const bt_value *clock_uid_val =
+		bt_value_map_borrow_entry_value_const(params, "clock-uid");
+	if (clock_uid_val) {
+		ftrace_in->clock_uid = strdup(bt_value_string_get(clock_uid_val));
+	}
 
 	ftrace_in->tc_input = tracecmd_open(path, TRACECMD_FL_LOAD_NO_PLUGINS);
 	if (!ftrace_in->tc_input) {
@@ -376,6 +400,7 @@ void ftrace_in_finalize(bt_self_component_source *self_component_source)
 		free(ftrace_in->port_data[i]);
 	}
 	free(ftrace_in->port_data);
+	free(ftrace_in->clock_uid);
 	free(ftrace_in);
 }
 
