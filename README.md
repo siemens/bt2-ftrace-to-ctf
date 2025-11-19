@@ -18,6 +18,7 @@ The plugin uses the following initialization parameters:
 - "inputs": array of string, mandatory: providing exactly one input file path
 - "lttng": boolean, optional: indicating if LTTng semantics shall be used
 - "clock-offset": uint64, optional: trace clock offset from world clock in ns
+- "clock-uid": string, optional: UID or UUID of the trace clock
 
 The plugin further implements the following query interfaces:
 

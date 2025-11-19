@@ -12,6 +12,7 @@ project(
 )
 
 glib_dep = dependency('glib-2.0')
+uuid_dep = dependency('uuid')
 traceevent_dep = dependency('libtraceevent')
 tracecmd_dep = dependency('libtracecmd')
 babeltrace2_dep = dependency('babeltrace2')
@@ -36,7 +37,13 @@ bt2_ftrace_plugin = shared_library('babeltrace-plugin-ftrace',
   name_prefix: '',
   install_dir: get_option('libdir') / 'babeltrace2/plugins',
   install: true,
-  dependencies: [tracecmd_dep, traceevent_dep, babeltrace2_dep, glib_dep]
+  dependencies: [
+    tracecmd_dep,
+    traceevent_dep,
+    babeltrace2_dep,
+    glib_dep,
+    uuid_dep
+  ]
 )
 
 executable('ftrace-to-ctf',
