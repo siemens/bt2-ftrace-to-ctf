@@ -9,6 +9,7 @@
 #include <babeltrace2/babeltrace.h>
 
 #include "bt-ftrace-source.h"
+#include "bt-ftrace-tracemeta.h"
 
 /* Mandatory */
 BT_PLUGIN_MODULE()
@@ -36,3 +37,17 @@ BT_PLUGIN_SOURCE_COMPONENT_CLASS_MESSAGE_ITERATOR_CLASS_FINALIZE_METHOD(
 BT_PLUGIN_SOURCE_COMPONENT_CLASS_GET_SUPPORTED_MIP_VERSIONS_METHOD(
 	tracedat, ftrace_get_supported_mip_versions);
 BT_PLUGIN_SOURCE_COMPONENT_CLASS_QUERY_METHOD(tracedat, ftrace_query_method);
+
+/* Define the `tracemeta` sink component class */
+BT_PLUGIN_SINK_COMPONENT_CLASS(tracemeta, tracemeta_out_consume);
+BT_PLUGIN_SINK_COMPONENT_CLASS_DESCRIPTION(
+	tracemeta, "emit per stream metadata of the trace clock");
+
+BT_PLUGIN_SINK_COMPONENT_CLASS_INITIALIZE_METHOD(tracemeta,
+												 tracemeta_out_initialize);
+BT_PLUGIN_SINK_COMPONENT_CLASS_FINALIZE_METHOD(tracemeta,
+											   tracemeta_out_finalize);
+BT_PLUGIN_SINK_COMPONENT_CLASS_GRAPH_IS_CONFIGURED_METHOD(
+	tracemeta, tracemeta_out_graph_is_configured);
+BT_PLUGIN_SINK_COMPONENT_CLASS_GET_SUPPORTED_MIP_VERSIONS_METHOD(
+	tracemeta, tracemeta_out_get_supported_mip_versions);

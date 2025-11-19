@@ -12,6 +12,7 @@ project(
 )
 
 glib_dep = dependency('glib-2.0')
+json_glib_dep = dependency('json-glib-1.0')
 uuid_dep = dependency('uuid')
 traceevent_dep = dependency('libtraceevent')
 tracecmd_dep = dependency('libtracecmd')
@@ -31,6 +32,8 @@ bt2_ftrace_plugin = shared_library('babeltrace-plugin-ftrace',
     'src/bt-ftrace-plugin.c',
     'src/bt-ftrace-source.c',
     'src/bt-ftrace-source.h',
+    'src/bt-ftrace-tracemeta.c',
+    'src/bt-ftrace-tracemeta.h'
     ),
   c_args: ['-Wno-unused-parameter'],
   gnu_symbol_visibility: 'hidden',
@@ -42,6 +45,7 @@ bt2_ftrace_plugin = shared_library('babeltrace-plugin-ftrace',
     traceevent_dep,
     babeltrace2_dep,
     glib_dep,
+    json_glib_dep,
     uuid_dep
   ]
 )

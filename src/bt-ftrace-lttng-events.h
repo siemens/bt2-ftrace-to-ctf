@@ -3,6 +3,9 @@
  * SPDX-License-Identifier: LGPL-2.1-or-later
  */
 
+#ifndef _BT_FTRACE_LTTNG_EVENTS_H
+#define _BT_FTRACE_LTTNG_EVENTS_H
+
 #include <babeltrace2/babeltrace.h>
 #include <event-parse.h>
 
@@ -28,3 +31,5 @@ const char *lttng_get_field_name_from_event(const struct tep_event *event,
 unsigned long long lttng_get_field_val_from_event(const struct tep_event *event,
 												  const char *field_name,
 												  unsigned long long val);
+
+#endif

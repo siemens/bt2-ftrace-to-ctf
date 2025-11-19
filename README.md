@@ -13,6 +13,13 @@ This repository contains two components:
 
 ## Babeltrace2 Plugin (ftrace)
 
+The plugin provides two components:
+
+- `source.ftrace.tracedat`: read a trace.dat file
+- `sink.ftrace.tracemeta`: emit clock definitions in JSON format for any stream begin message
+
+### Plugin `source.ftrace.tracedat`
+
 The plugin uses the following initialization parameters:
 
 - "inputs": array of string, mandatory: providing exactly one input file path
@@ -30,6 +37,30 @@ The plugin further implements the following query interfaces:
 ```bash
 trace-cmd record -C mono -e "sched:sched_switch" sleep 1
 babeltrace2 --plugin-path=. trace.dat
+```
+
+### Plugin `sink.ftrace.tracemeta`
+
+This plugin allows to gather information about trace clocks of a stream.
+The gathered data is written as JSON output either to standard out (default)
+or to a user-provided file descriptor. The output format is in json lines,
+whereby each object is as following:
+
+```
+{
+  stream: { id: <int>, name: <str>},
+  clock: { offset_s: <int>, offset_c: <int>, frequency: <int> }
+}
+```
+
+The plugin uses the following initialization parameters:
+
+- "outfd": int, optional: file descriptor to write output data to
+
+**Example:**
+
+```bash
+babeltrace2 --plugin-path=. --component=meta:sink.ftrace.tracemeta /path/to/lttng-us/trace
 ```
 
 ## trace.dat to CTF LTTng CTF converter

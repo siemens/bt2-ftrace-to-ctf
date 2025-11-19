@@ -57,7 +57,8 @@ jobs:
             libtraceevent-dev \
             libtracecmd-dev \
             libtracefs-dev \
-            libglib2.0-dev
+            libglib2.0-dev \
+            libjson-glib-dev
 
       - name: build components
         run: |
