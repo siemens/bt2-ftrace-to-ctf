@@ -4,6 +4,7 @@
  */
 
 #include <babeltrace2/babeltrace.h>
+#include <stdio.h>
 
 #define _LOG_PREFIX "[bt-ftrace]"
 
