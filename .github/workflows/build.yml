@@ -39,6 +39,7 @@ jobs:
       matrix:
         distro:
           ["debian:bookworm", "debian:trixie", "debian:forky", "ubuntu:noble"]
+        meson_opts: ["-Dtracecmd-internals=false", "-Dtracecmd-internals=true"]
     container: ${{ matrix.distro }}
     steps:
       - name: checkout repository
@@ -62,5 +63,5 @@ jobs:
 
       - name: build components
         run: |
-          meson setup -Dbuildtype=debugoptimized build
+          meson setup -Dbuildtype=debugoptimized ${{ matrix.meson_opts }} build
           cd build && ninja
