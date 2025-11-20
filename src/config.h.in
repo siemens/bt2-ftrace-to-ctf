@@ -13,6 +13,9 @@
 /* In LTTng mode, generate data according to this version */
 #define LTTNG_VERSION_MAJOR 2
 #define LTTNG_VERSION_MINOR 13
+
+/* Allow usage of libtracecmd private symbols */
+#define WITH_TRACE_CMD_PRIVATE_SYMBOLS @tracecmd_private_syms@
 // clang-format on
 
 #endif
