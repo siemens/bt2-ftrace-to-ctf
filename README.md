@@ -50,8 +50,10 @@ whereby each object is as following:
 
 ```
 {
+  trace: { uid: <str> | uuid: <str> },
   stream: { id: <int>, name: <str>},
-  clock: { offset_s: <int>, offset_c: <int>, frequency: <int> }
+  clock: { offset_s: <int>, offset_c: <int>, frequency: <int>, uid: str | uuid: str },
+  env: { { name: value }, ... }
 }
 ```
 

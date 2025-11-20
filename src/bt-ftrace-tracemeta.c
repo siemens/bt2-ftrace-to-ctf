@@ -5,8 +5,10 @@
  * The tracemeta sink emits per-stream clock metadata in json-lines format that
  * can be used to sync the clocks of multiple traces. The format is as following:
  * {
+ *   trace: { uid: <str> | uuid: <str> },
  *   stream: { id: <int>, name: <str>},
- *   clock: { offset_s: <int>, offset_c: <int>, frequency: <int> }
+ *   clock: { offset_s: <int>, offset_c: <int>, frequency: <int>, uid: str | uuid: str },
+ *   env: { { name: value }, ... }
  * }
  * The sink component uses the following initialization parameters:
  * 
@@ -97,20 +99,57 @@ static void emit_metadata_json(struct tracemeta_out *cm_out,
 	int64_t offset_sec;
 	uint64_t offset_cycles, freq;
 	bt_uuid clock_uuid = NULL;
+	bt_uuid trace_uuid = NULL;
+	char uuid_buf[UUID_STR_LEN];
 
 	const bt_stream *stream =
 		bt_message_stream_beginning_borrow_stream_const(message);
+	const bt_trace *trace = bt_stream_borrow_trace_const(stream);
 	const bt_clock_class *clock_cls =
 		bt_message_stream_beginning_borrow_stream_class_default_clock_class_const(
 			message);
 	bt_clock_class_get_offset(clock_cls, &offset_sec, &offset_cycles);
 	freq = bt_clock_class_get_frequency(clock_cls);
-	if (cm_out->mip_version == 0) {
-		clock_uuid = bt_clock_class_get_uuid(clock_cls);
-	}
 
 	JsonBuilder *builder = json_builder_new();
 	json_builder_begin_object(builder);
+
+	/* trace object */
+	json_builder_set_member_name(builder, "trace");
+	json_builder_begin_object(builder);
+
+	if (cm_out->mip_version == 0) {
+		trace_uuid = bt_trace_get_uuid(trace);
+		uuid_unparse(trace_uuid, uuid_buf);
+		json_builder_set_member_name(builder, "uuid");
+		json_builder_add_string_value(builder, uuid_buf);
+	} else if (cm_out->mip_version > 0) {
+#if BT2_VERSION_MINOR >= 1
+		const char *trace_uid = bt_trace_get_uid(trace);
+		json_builder_set_member_name(builder, "uid");
+		json_builder_add_string_value(builder, trace_uid);
+#endif
+	}
+	json_builder_end_object(builder);
+
+	/* environment object */
+	json_builder_set_member_name(builder, "env");
+	json_builder_begin_object(builder);
+	const uint64_t env_nentries = bt_trace_get_environment_entry_count(trace);
+	for (uint64_t i = 0; i < env_nentries; i++) {
+		const char *name;
+		const bt_value *value;
+		bt_trace_borrow_environment_entry_by_index_const(trace, i, &name,
+														 &value);
+		json_builder_set_member_name(builder, name);
+		if (bt_value_is_string(value)) {
+			json_builder_add_string_value(builder, bt_value_string_get(value));
+		} else {
+			json_builder_add_int_value(builder,
+									   bt_value_integer_signed_get(value));
+		}
+	}
+	json_builder_end_object(builder);
 
 	/* stream object */
 	json_builder_set_member_name(builder, "stream");
@@ -136,8 +175,8 @@ static void emit_metadata_json(struct tracemeta_out *cm_out,
 	json_builder_set_member_name(builder, "frequency");
 	json_builder_add_int_value(builder, (gint64)freq);
 
-	if (clock_uuid) {
-		char uuid_buf[UUID_STR_LEN];
+	if (cm_out->mip_version == 0) {
+		clock_uuid = bt_clock_class_get_uuid(clock_cls);
 		uuid_unparse(clock_uuid, uuid_buf);
 		json_builder_set_member_name(builder, "uuid");
 		json_builder_add_string_value(builder, uuid_buf);
