@@ -1,0 +1,18 @@
+/**
+ * SPDX-FileCopyrightText: (C) 2025 Siemens
+ * SPDX-License-Identifier: LGPL-2.1-or-later
+ */
+#ifndef _CONFIG_H
+#define _CONFIG_H
+
+// clang-format off
+#define FT_VERSION_MAJOR @version_major@
+#define FT_VERSION_MINOR @version_minor@
+#define FT_VERSION_PATCH @version_patch@
+
+/* In LTTng mode, generate data according to this version */
+#define LTTNG_VERSION_MAJOR 2
+#define LTTNG_VERSION_MINOR 13
+// clang-format on
+
+#endif

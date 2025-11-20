@@ -23,6 +23,16 @@ add_project_arguments(
   language : 'c'
 )
 
+project_version_parts = meson.project_version().split('.')
+conf_data = configuration_data({
+  'version_major': project_version_parts[0],
+  'version_minor': project_version_parts[1],
+  'version_patch': project_version_parts[2]
+})
+configure_file(input : 'src/config.h.in',
+               output : 'config.h',
+               configuration : conf_data)
+config_inc = include_directories('.')
 
 bt2_ftrace_plugin = shared_library('babeltrace-plugin-ftrace',
   sources: files(
@@ -37,6 +47,7 @@ bt2_ftrace_plugin = shared_library('babeltrace-plugin-ftrace',
     ),
   c_args: ['-Wno-unused-parameter'],
   gnu_symbol_visibility: 'hidden',
+  include_directories: config_inc,
   name_prefix: '',
   install_dir: get_option('libdir') / 'babeltrace2/plugins',
   install: true,

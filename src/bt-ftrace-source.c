@@ -10,6 +10,8 @@
  * "lttng": boolean, optional: indicating if LTTng semantics shall be used
  * "clock-offset": uint64, optional: trace clock offset from world clock in ns
  * "clock-uid": string, optional: UID or UUID of the trace clock
+ * "trace-name": string, optional: trace name and `env.trace_name` property
+ * "trace-creation-datetime": string (ISO‑8601), optional: `env.trace_creation_datetime` property
  *
  * Example:
  *   trace-cmd record -C mono -e "sched:sched_switch" sleep 1
@@ -21,6 +23,7 @@
  *
  */
 
+#include "config.h"
 #include "bt-ftrace-lttng-events.h"
 #include "bt-ftrace-logging.h"
 #include "bt-ftrace-source.h"
@@ -58,6 +61,13 @@ struct ftrace_in {
 
 	/* use LTTng event names and semantics on well-known events */
 	bt_bool lttng_format;
+
+	/* tracer and trace metadata */
+	char *trace_name;
+	char *trace_hostname;
+	char *trace_creation_datetime;
+	int tracer_version_major;
+	int tracer_version_minor;
 
 	/* clock offset to world clock in ns */
 	uint64_t clock_offset_ns;
@@ -275,7 +285,29 @@ static void create_metadata_and_stream(bt_self_component *self_component,
 										  "global");
 	bt_trace_set_environment_entry_string(trace, "trace_name",
 										  "global-kernel-session");
-	bt_trace_set_environment_entry_string(trace, "tracer_name", "ftrace");
+	/* The CTF sink dispatches based on this value. Fake it */
+	bt_trace_set_environment_entry_string(
+		trace, "tracer_name",
+		ftrace_in->lttng_format ? "lttng-modules" : "ftrace");
+
+	bt_trace_set_environment_entry_integer(trace, "tracer_major",
+										   ftrace_in->lttng_format ?
+											   LTTNG_VERSION_MAJOR :
+											   ftrace_in->tracer_version_major);
+	bt_trace_set_environment_entry_integer(trace, "tracer_minor",
+										   ftrace_in->lttng_format ?
+											   LTTNG_VERSION_MINOR :
+											   ftrace_in->tracer_version_minor);
+
+	if (ftrace_in->trace_hostname) {
+		bt_trace_set_environment_entry_string(trace, "hostname",
+											  ftrace_in->trace_hostname);
+	}
+	if (ftrace_in->trace_creation_datetime) {
+		bt_trace_set_environment_entry_string(
+			trace, "trace_creation_datetime",
+			ftrace_in->trace_creation_datetime);
+	}
 
 	/*
 	 * Create one stream per CPU stream in ftrace data
@@ -306,6 +338,8 @@ ftrace_in_initialize(bt_self_component_source *self_component_source,
 	/* Allocate a private data structure */
 	char NAME_BUF[16];
 	struct ftrace_in *ftrace_in = calloc(1, sizeof(*ftrace_in));
+	ftrace_in->tracer_version_major = FT_VERSION_MAJOR;
+	ftrace_in->tracer_version_minor = FT_VERSION_MINOR;
 	ftrace_in->log_level =
 		bt_component_get_logging_level(bt_component_source_as_component_const(
 			bt_self_component_source_as_component_source(
@@ -338,6 +372,18 @@ ftrace_in_initialize(bt_self_component_source *self_component_source,
 		bt_value_map_borrow_entry_value_const(params, "clock-uid");
 	if (clock_uid_val) {
 		ftrace_in->clock_uid = strdup(bt_value_string_get(clock_uid_val));
+	}
+	const bt_value *trace_name_val =
+		bt_value_map_borrow_entry_value_const(params, "trace-name");
+	if (trace_name_val) {
+		ftrace_in->trace_name = strdup(bt_value_string_get(trace_name_val));
+	}
+	/* TODO: trace hostname from trace.dat */
+	const bt_value *trace_date_val = bt_value_map_borrow_entry_value_const(
+		params, "trace-creation-datetime");
+	if (trace_date_val) {
+		ftrace_in->trace_creation_datetime =
+			strdup(bt_value_string_get(trace_date_val));
 	}
 
 	ftrace_in->tc_input = tracecmd_open(path, TRACECMD_FL_LOAD_NO_PLUGINS);
@@ -401,6 +447,9 @@ void ftrace_in_finalize(bt_self_component_source *self_component_source)
 	}
 	free(ftrace_in->port_data);
 	free(ftrace_in->clock_uid);
+	free(ftrace_in->trace_name);
+	free(ftrace_in->trace_hostname);
+	free(ftrace_in->trace_creation_datetime);
 	free(ftrace_in);
 }
 

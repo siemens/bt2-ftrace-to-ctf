@@ -26,6 +26,8 @@ The plugin uses the following initialization parameters:
 - "lttng": boolean, optional: indicating if LTTng semantics shall be used
 - "clock-offset": uint64, optional: trace clock offset from world clock in ns
 - "clock-uid": string, optional: UID or UUID of the trace clock
+- "trace-name": string, optional: trace name and `env.trace_name` property
+- "trace-creation-datetime": string (ISO‑8601), optional: `env.trace_creation_datetime` property
 
 The plugin further implements the following query interfaces:
 
