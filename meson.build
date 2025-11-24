@@ -25,8 +25,20 @@ bt2_dep_version = babeltrace2_dep.version().split('.')
 tc_has_reverse_it = cc.has_function('tracecmd_iterate_events_reverse',
                                     dependencies: tracecmd_dep,
                                     required: false)
+bt2_has_clock_uid = cc.has_function('bt_clock_class_set_uid',
+                                    dependencies: babeltrace2_dep,
+                                    required: false)
+bt2_has_clock_unknown = cc.has_function('bt_clock_class_set_origin_unknown',
+                                        dependencies: babeltrace2_dep,
+                                        required: false)
+bt2_has_trace_uid = cc.has_function('bt_trace_set_uid',
+                                    dependencies: babeltrace2_dep,
+                                    required: false)
+
 add_project_arguments(
-  '-DBT2_VERSION_MINOR=' + bt2_dep_version[1],
+  '-DHAS_BT2_CLOCK_UID=' + bt2_has_clock_uid.to_string(),
+  '-DHAS_BT2_CLOCK_UNKNOWN=' + bt2_has_clock_unknown.to_string(),
+  '-DHAS_BT2_TRACE_UID=' + bt2_has_trace_uid.to_string(),
   '-DHAS_TRACECMD_REVERSE_ITERATION=' + tc_has_reverse_it.to_string(),
   language : 'c'
 )

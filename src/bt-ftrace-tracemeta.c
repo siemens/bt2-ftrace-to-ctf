@@ -124,7 +124,7 @@ static void emit_metadata_json(struct tracemeta_out *cm_out,
 		json_builder_set_member_name(builder, "uuid");
 		json_builder_add_string_value(builder, uuid_buf);
 	} else if (cm_out->mip_version > 0) {
-#if BT2_VERSION_MINOR >= 1
+#if HAS_BT2_TRACE_UID
 		const char *trace_uid = bt_trace_get_uid(trace);
 		json_builder_set_member_name(builder, "uid");
 		json_builder_add_string_value(builder, trace_uid);
@@ -181,7 +181,7 @@ static void emit_metadata_json(struct tracemeta_out *cm_out,
 		json_builder_set_member_name(builder, "uuid");
 		json_builder_add_string_value(builder, uuid_buf);
 	} else if (cm_out->mip_version > 0) {
-#if BT2_VERSION_MINOR >= 1
+#if HAS_BT2_CLOCK_UID
 		const char *clock_uid = bt_clock_class_get_uid(clock_cls);
 		json_builder_set_member_name(builder, "uid");
 		json_builder_add_string_value(builder, clock_uid);

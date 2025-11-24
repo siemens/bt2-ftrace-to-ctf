@@ -234,7 +234,7 @@ static void create_metadata_and_stream(bt_self_component *self_component,
 								  ftrace_in->clock_offset_ns % NS_PER_S);
 		bt_clock_class_origin_is_unix_epoch(clock_class);
 	} else {
-#if BT2_VERSION_MINOR >= 1
+#if HAS_BT2_CLOCK_UNKNOWN
 		bt_clock_class_set_origin_unknown(clock_class);
 #endif
 	}
@@ -244,7 +244,7 @@ static void create_metadata_and_stream(bt_self_component *self_component,
 			uuid_parse(ftrace_in->clock_uid, clock_uuid);
 			bt_clock_class_set_uuid(clock_class, clock_uuid);
 		} else {
-#if BT2_VERSION_MINOR >= 1
+#if HAS_BT2_CLOCK_UID
 			bt_clock_class_set_uid(clock_class, ftrace_in->clock_uid);
 #endif
 		}
@@ -297,7 +297,7 @@ static void create_metadata_and_stream(bt_self_component *self_component,
 	/* Create a default trace from (instance of `trace_class`) */
 	bt_trace *trace = bt_trace_create(trace_class);
 	sprintf(NAME_BUF, "%llu", tracecmd_get_traceid(ftrace_in->tc_input));
-#if BT2_VERSION_MINOR >= 1
+#if HAS_BT2_HAS_TRACE_UID
 	if (mip_version >= 2) {
 		bt_trace_set_uid(trace, NAME_BUF);
 	}
