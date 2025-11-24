@@ -11,5 +11,6 @@
 struct tracecmd_input;
 
 const char *tracecmd_get_uname(struct tracecmd_input *handle);
+const char *tracecmd_get_trace_clock(struct tracecmd_input *handle);
 
 #endif

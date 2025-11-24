@@ -215,6 +215,9 @@ static void create_metadata_and_stream(bt_self_component *self_component,
 	char NAME_BUF[32];
 	const uint64_t mip_version =
 		bt_self_component_get_graph_mip_version(self_component);
+	/* assume monotonic clock if not provided otherwise */
+	const char *traceclock = "mono";
+	bt_bool clock_is_monotonic = true;
 
 	/* Create a default trace class */
 	bt_trace_class *trace_class = bt_trace_class_create(self_component);
@@ -223,10 +226,19 @@ static void create_metadata_and_stream(bt_self_component *self_component,
 	bt_stream_class *stream_class = bt_stream_class_create(trace_class);
 	bt_stream_class_set_name(stream_class, "ftrace-stream");
 
+#if WITH_TRACE_CMD_PRIVATE_SYMBOLS
+	traceclock = tracecmd_get_trace_clock(ftrace_in->tc_input);
+#endif
 	/* Create a default clock class (1 GHz frequency) */
 	bt_clock_class *clock_class = bt_clock_class_create(self_component);
-	bt_clock_class_set_name(clock_class, "monotonic");
-	bt_clock_class_set_description(clock_class, "Monotonic Clock");
+	if (strcmp(traceclock, "mono") == 0 ||
+		strcmp(traceclock, "mono_raw") == 0) {
+		bt_clock_class_set_name(clock_class, "monotonic");
+		bt_clock_class_set_description(clock_class, "Monotonic Clock");
+	} else {
+		clock_is_monotonic = false;
+		bt_clock_class_set_name(clock_class, traceclock);
+	}
 	/* make the clock compatible with an LTTng US clock definition */
 	if (ftrace_in->clock_offset_ns) {
 		bt_clock_class_set_offset(clock_class,
@@ -247,6 +259,12 @@ static void create_metadata_and_stream(bt_self_component *self_component,
 #if HAS_BT2_CLOCK_UID
 			bt_clock_class_set_uid(clock_class, ftrace_in->clock_uid);
 #endif
+		}
+		if (!clock_is_monotonic) {
+			BT_FTRACE_LOG_WARNING(
+				ftrace_in->log_level,
+				"ftrace used non-monotonic clock \"%s\". Traces are likely misaligned.",
+				traceclock);
 		}
 	}
 
