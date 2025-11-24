@@ -50,16 +50,26 @@ jobs:
       - name: install dependencies
         run: |
           apt-get update
+          # Install common build dependencies
           apt-get install -y --no-install-recommends \
             build-essential \
             ninja-build \
-            meson \
             libbabeltrace2-dev \
             libtraceevent-dev \
             libtracecmd-dev \
             libtracefs-dev \
             libglib2.0-dev \
             libjson-glib-dev
+          # Install meson, using backports for Debian bookworm
+          if [[ "${{ matrix.distro }}" == "debian:bookworm" ]]; then
+            # Add backports repository for Debian bookworm
+            echo "deb http://deb.debian.org/debian bookworm-backports main" > /etc/apt/sources.list.d/backports.list
+            apt-get update
+            apt-get install -y -t bookworm-backports meson
+          else
+            apt-get install -y meson
+          fi
+        shell: bash
 
       - name: build components
         run: |
