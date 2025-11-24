@@ -35,6 +35,7 @@ jobs:
 
   build:
     runs-on: ubuntu-24.04
+    needs: generate-trace-data
     strategy:
       matrix:
         distro:
@@ -75,3 +76,42 @@ jobs:
         run: |
           meson setup -Dbuildtype=debugoptimized ${{ matrix.meson_opts }} build
           cd build && ninja
+
+      - name: download sample trace data
+        uses: actions/download-artifact@v5
+        with:
+          name: trace-data
+
+      - name: smoke test deps
+        run: apt-get install -y babeltrace2
+      - name: smoke test source.ftrace.tracedat
+        env:
+          BABELTRACE_PLUGIN_PATH: ${{ github.workspace }}/build
+        run: babeltrace2 trace.dat
+      - name: smoke test sink.ftrace.tracemeta
+        env:
+          BABELTRACE_PLUGIN_PATH: ${{ github.workspace }}/build
+        run: babeltrace2 --component=meta:sink.ftrace.tracemeta trace.dat
+      - name: smoke test query inteface
+        env:
+          BABELTRACE_PLUGIN_PATH: ${{ github.workspace }}/build
+        run: babeltrace2 query -p "inputs=[trace.dat]" source.ftrace.tracedat babeltrace.trace-infos
+      - name: smoke test ftrace-to-ctf
+        env:
+          BABELTRACE_PLUGIN_PATH: ${{ github.workspace }}/build
+        run: ./build/ftrace-to-ctf --lttng trace.dat /tmp
+
+  generate-trace-data:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y trace-cmd
+
+      - name: generate trace.dat sample data
+        run: sudo trace-cmd record -C mono -e "sched:*" sleep 1
+      - uses: actions/upload-artifact@v5
+        with:
+          name: trace-data
+          path: trace.dat
