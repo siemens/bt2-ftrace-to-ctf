@@ -16,6 +16,13 @@
 
 /* Allow usage of libtracecmd private symbols */
 #define WITH_TRACE_CMD_PRIVATE_SYMBOLS @tracecmd_private_syms@
+
+/* optional symbols */
+#define HAS_BT2_CLOCK_UID @has_bt2_clock_uid@
+#define HAS_BT2_CLOCK_UNKNOWN @has_bt2_clock_unknown@
+#define HAS_BT2_TRACE_UID @has_bt2_trace_uid@
+#define HAS_TRACECMD_REVERSE_ITERATION @has_tracecmd_reverse_iteration@
+
 // clang-format on
 
 #endif

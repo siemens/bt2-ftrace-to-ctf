@@ -35,20 +35,16 @@ bt2_has_trace_uid = cc.has_function('bt_trace_set_uid',
                                     dependencies: babeltrace2_dep,
                                     required: false)
 
-add_project_arguments(
-  '-DHAS_BT2_CLOCK_UID=' + bt2_has_clock_uid.to_string(),
-  '-DHAS_BT2_CLOCK_UNKNOWN=' + bt2_has_clock_unknown.to_string(),
-  '-DHAS_BT2_TRACE_UID=' + bt2_has_trace_uid.to_string(),
-  '-DHAS_TRACECMD_REVERSE_ITERATION=' + tc_has_reverse_it.to_string(),
-  language : 'c'
-)
-
 project_version_parts = meson.project_version().split('.')
 conf_data = configuration_data({
   'version_major': project_version_parts[0],
   'version_minor': project_version_parts[1],
   'version_patch': project_version_parts[2],
-  'tracecmd_private_syms': get_option('tracecmd-internals').to_int()
+  'tracecmd_private_syms': get_option('tracecmd-internals').to_int(),
+  'has_bt2_clock_uid': bt2_has_clock_uid.to_int(),
+  'has_bt2_clock_unknown': bt2_has_clock_unknown.to_int(),
+  'has_bt2_trace_uid': bt2_has_trace_uid.to_int(),
+  'has_tracecmd_reverse_iteration': tc_has_reverse_it.to_int()
 })
 configure_file(input : 'src/config.h.in',
                output : 'config.h',
