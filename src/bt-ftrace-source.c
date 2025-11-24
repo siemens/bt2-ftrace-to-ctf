@@ -549,9 +549,6 @@ ftrace_in_message_iterator_initialize(
 
 	/* Set the message iterator's initial state */
 	ftrace_in_iter->state = FTRACE_IN_MESSAGE_ITERATOR_STATE_STREAM_BEGINNING;
-
-	/* Open the input file in text mode */
-	/* TODO: open stream */
 	ftrace_in_iter->events_in_pkg = 0;
 
 	/* Set the message iterator's user data to our private data structure */
@@ -635,7 +632,6 @@ create_message_from_event(struct ftrace_in_message_iterator *ftrace_in_iter,
 			bt_field_structure_borrow_member_field_by_name(context, "cpu_id");
 		bt_field_integer_unsigned_set_value(cpu_id_f, (unsigned)rec->cpu);
 
-		/* TODO: fill fields */
 		ftrace_in_iter->packet = packet;
 		ftrace_in_iter->events_in_pkg = 0;
 		message =
