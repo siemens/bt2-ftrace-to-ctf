@@ -5,11 +5,14 @@ project(
   'ftrace-to-ctf',
   'c',
   version : '0.1.0',
+  meson_version : '>=1.3.0',
   default_options : [
     'c_std=gnu11',
     'warning_level=3',
   ]
 )
+
+cc = meson.get_compiler('c')
 
 glib_dep = dependency('glib-2.0')
 json_glib_dep = dependency('json-glib-1.0')
@@ -18,8 +21,13 @@ traceevent_dep = dependency('libtraceevent')
 tracecmd_dep = dependency('libtracecmd')
 babeltrace2_dep = dependency('babeltrace2')
 bt2_dep_version = babeltrace2_dep.version().split('.')
+
+tc_has_reverse_it = cc.has_function('tracecmd_iterate_events_reverse',
+                                    dependencies: tracecmd_dep,
+                                    required: false)
 add_project_arguments(
   '-DBT2_VERSION_MINOR=' + bt2_dep_version[1],
+  '-DHAS_TRACECMD_REVERSE_ITERATION=' + tc_has_reverse_it.to_string(),
   language : 'c'
 )
 

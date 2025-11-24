@@ -23,6 +23,8 @@
  *
  */
 
+#define _GNU_SOURCE
+
 #include "config.h"
 #include "bt-ftrace-lttng-events.h"
 #include "bt-ftrace-logging.h"
@@ -31,6 +33,7 @@
 #include "trace-cmd-private.h"
 #endif
 
+#include <sched.h>
 #include <babeltrace2/babeltrace.h>
 #include <event-parse.h>
 #include <glib.h>
@@ -810,6 +813,18 @@ nothing_discovered:
 	return BT_COMPONENT_CLASS_QUERY_METHOD_STATUS_OK;
 }
 
+#if HAS_TRACECMD_REVERSE_ITERATION
+static int get_last_record_ts_clbk(struct tracecmd_input *tc_input,
+								   struct tep_record *rec, int cpu,
+								   void *userdata)
+{
+	uint64_t *ts_end = (uint64_t *)userdata;
+	*ts_end = rec->ts;
+	/* stop iteration */
+	return -1;
+}
+#endif
+
 /*
  * Implements the babeltrace.trace-infos query interface.
  */
@@ -850,15 +865,28 @@ ftrace_query_trace_infos(bt_self_component_class_source *self_component_class,
 		bt_value_map_insert_empty_map_entry(streaminfo, "range-ns", &range);
 		bt_value_map_insert_signed_integer_entry(range, "begin-ns",
 												 (int64_t)ts_begin);
-		/* TODO: horrible implementation that reads the whole trace file just to get
-		 * the timestamp of the last event */
-		struct tep_record *rec = tracecmd_read_cpu_first(tc_input, i);
+		cpu_set_t cpu_set;
+		CPU_ZERO(&cpu_set);
+		CPU_SET(i, &cpu_set);
 		uint64_t ts_end = ts_begin;
+#if HAS_TRACECMD_REVERSE_ITERATION
+		/* 
+		 * O(1) implementation, potentially with upstream memory leak as reported in
+		 * https://lore.kernel.org/linux-trace-devel/20251121134749.1530855-1-felix.moessbauer@siemens.com/
+		 */
+		tracecmd_iterate_events_reverse(tc_input, &cpu_set, ncpus,
+										get_last_record_ts_clbk,
+										(void *)&ts_end, 0);
+#else
+		/* O(n) implementation iterating the whole trace file */
+		tracecmd_read_cpu_first(tc_input, i);
+		struct tep_record *rec = tracecmd_read_cpu_first(tc_input, i);
 		while (rec) {
 			ts_end = rec->ts;
 			tracecmd_free_record(rec);
 			rec = tracecmd_read_data(tc_input, i);
 		}
+#endif
 		bt_value_map_insert_signed_integer_entry(range, "end-ns", ts_end);
 	}
 
