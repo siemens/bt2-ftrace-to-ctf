@@ -893,7 +893,6 @@ ftrace_query_trace_infos(bt_self_component_class_source *self_component_class,
 										(void *)&ts_end, 0);
 #else
 		/* O(n) implementation iterating the whole trace file */
-		tracecmd_read_cpu_first(tc_input, i);
 		struct tep_record *rec = tracecmd_read_cpu_first(tc_input, i);
 		while (rec) {
 			ts_end = rec->ts;
