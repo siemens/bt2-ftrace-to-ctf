@@ -20,7 +20,6 @@ uuid_dep = dependency('uuid')
 traceevent_dep = dependency('libtraceevent')
 tracecmd_dep = dependency('libtracecmd')
 babeltrace2_dep = dependency('babeltrace2')
-bt2_dep_version = babeltrace2_dep.version().split('.')
 
 tc_has_reverse_it = cc.has_function('tracecmd_iterate_events_reverse',
                                     dependencies: tracecmd_dep,
@@ -53,6 +52,13 @@ config_inc = include_directories('.')
 
 summary({'private libtracecmd symbols (plugin)': get_option('tracecmd-internals')}, bool_yn: true, section: 'Build Configuration')
 
+# hidden symbols are supported from babeltrace 2.1 on:
+# https://github.com/efficios/babeltrace/commit/1353b066072e6c389ff35853bac83f65597e7a6a
+if babeltrace2_dep.version().version_compare('>=2.1')
+  bt2_plugin_sym_vis = 'hidden'
+else
+  bt2_plugin_sym_vis = 'default'
+endif
 bt2_ftrace_plugin = shared_library('babeltrace-plugin-ftrace',
   sources: files(
     'src/bt-ftrace-logging.h',
@@ -65,7 +71,7 @@ bt2_ftrace_plugin = shared_library('babeltrace-plugin-ftrace',
     'src/bt-ftrace-tracemeta.h'
     ),
   c_args: ['-Wno-unused-parameter'],
-  gnu_symbol_visibility: 'hidden',
+  gnu_symbol_visibility: bt2_plugin_sym_vis,
   include_directories: config_inc,
   name_prefix: '',
   install_dir: get_option('libdir') / 'babeltrace2/plugins',
