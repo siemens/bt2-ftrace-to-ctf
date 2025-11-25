@@ -5,9 +5,9 @@
  * The tracemeta sink emits per-stream clock metadata in json-lines format that
  * can be used to sync the clocks of multiple traces. The format is as following:
  * {
- *   trace: { uid: <str> | uuid: <str> },
+ *   trace: { (uid: <str> | uuid: <str>)? },
  *   stream: { id: <int>, name: <str>},
- *   clock: { offset_s: <int>, offset_c: <int>, frequency: <int>, uid: str | uuid: str },
+ *   clock: { offset_s: <int>, offset_c: <int>, frequency: <int>, (uid: str | uuid: str)? },
  *   env: { { name: value }, ... }
  * }
  * The sink component uses the following initialization parameters:
@@ -120,9 +120,11 @@ static void emit_metadata_json(struct tracemeta_out *cm_out,
 
 	if (cm_out->mip_version == 0) {
 		trace_uuid = bt_trace_get_uuid(trace);
-		uuid_unparse(trace_uuid, uuid_buf);
-		json_builder_set_member_name(builder, "uuid");
-		json_builder_add_string_value(builder, uuid_buf);
+		if (trace_uuid) {
+			uuid_unparse(trace_uuid, uuid_buf);
+			json_builder_set_member_name(builder, "uuid");
+			json_builder_add_string_value(builder, uuid_buf);
+		}
 	} else if (cm_out->mip_version > 0) {
 #if HAS_BT2_TRACE_UID
 		const char *trace_uid = bt_trace_get_uid(trace);
@@ -177,9 +179,11 @@ static void emit_metadata_json(struct tracemeta_out *cm_out,
 
 	if (cm_out->mip_version == 0) {
 		clock_uuid = bt_clock_class_get_uuid(clock_cls);
-		uuid_unparse(clock_uuid, uuid_buf);
-		json_builder_set_member_name(builder, "uuid");
-		json_builder_add_string_value(builder, uuid_buf);
+		if (clock_uuid) {
+			uuid_unparse(clock_uuid, uuid_buf);
+			json_builder_set_member_name(builder, "uuid");
+			json_builder_add_string_value(builder, uuid_buf);
+		}
 	} else if (cm_out->mip_version > 0) {
 #if HAS_BT2_CLOCK_UID
 		const char *clock_uid = bt_clock_class_get_uid(clock_cls);
