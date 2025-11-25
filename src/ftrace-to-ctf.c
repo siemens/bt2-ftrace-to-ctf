@@ -465,10 +465,22 @@ int main(int argc, char **argv)
 	bt_graph_add_filter_component(graph, filter_cls, "muxer", NULL,
 								  opts.loglevel, &filter);
 
+	/* sink component */
+	unsigned int p_major = 0;
+	bt_plugin_get_version(ctf_plugin, &p_major, NULL, NULL, NULL);
 	bt_value *sink_params = bt_value_map_create();
 	bt_value_map_insert_string_entry(sink_params, "path", opts.out_dir);
-	bt_value_map_insert_string_entry(sink_params, "ctf-version",
-									 opts.ctf_version);
+	/* 
+	 * this parameter is only available from plugin version 2.1 on, but
+	 * the plugin registers as version 2.0.0 (on 2.1) and does not set a
+	 * version on prior versions.
+	 */
+	if (p_major >= 2) {
+		bt_value_map_insert_string_entry(sink_params, "ctf-version",
+										 opts.ctf_version);
+	} else if (strcmp(opts.ctf_version, "2") == 0) {
+		fprintf(stderr, "on babeltrace 2.0, only CTF 1.8 is supported.\n");
+	}
 	bt_graph_add_sink_component(graph, sink_cls, "fs", sink_params,
 								opts.loglevel, &sink);
 	bt_value_put_ref(sink_params);
