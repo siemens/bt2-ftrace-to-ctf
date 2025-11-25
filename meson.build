@@ -4,7 +4,7 @@
 project(
   'ftrace-to-ctf',
   'c',
-  version : '0.1.0',
+  version : '0.2.0',
   meson_version : '>=1.3.0',
   default_options : [
     'c_std=gnu11',
