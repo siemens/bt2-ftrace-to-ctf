@@ -585,8 +585,7 @@ void ftrace_in_message_iterator_finalize(
 	struct ftrace_in_message_iterator *ftrace_in_iter =
 		bt_self_message_iterator_get_data(self_message_iterator);
 
-	/* Close the input file */
-	free(ftrace_in_iter->rec);
+	tracecmd_free_record(ftrace_in_iter->rec);
 
 	/* Redundant, as the packet is always closed when finishing the stream */
 	BT_PACKET_PUT_REF_AND_RESET(ftrace_in_iter->packet);
