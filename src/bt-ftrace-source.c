@@ -698,32 +698,39 @@ create_message_from_event(struct ftrace_in_message_iterator *ftrace_in_iter,
 		} else {
 			field_name = fields[j]->name;
 		}
-		const unsigned long flags = fields[j]->flags;
-		if (flags & TEP_FIELD_IS_POINTER || flags & TEP_FIELD_IS_DYNAMIC ||
-			flags & TEP_FIELD_IS_SYMBOLIC || flags & TEP_FIELD_IS_RELATIVE) {
-			/* TODO: handle these */
-			continue;
-		}
 
 		data_field = bt_field_structure_borrow_member_field_by_name(
 			payload_field, field_name);
-		if (flags & TEP_FIELD_IS_STRING) {
+		if (!data_field) {
+			BT_FTRACE_LOG_DEBUG(ftrace_in_iter->ftrace_in->log_level,
+								"skip unknown field \"%s\" on %s:%s",
+								field_name, trace_event->system,
+								trace_event->name);
+			continue;
+		}
+		const bt_field_class_type data_class =
+			bt_field_get_class_type(data_field);
+		if (bt_field_class_type_is(BT_FIELD_CLASS_TYPE_STRING, data_class)) {
 			int len;
 			char *strdata =
 				tep_get_field_raw(NULL, trace_event, field_name, rec, &len, 0);
 			bt_field_string_set_value(data_field, strdata);
-		} else if (flags & TEP_FIELD_IS_SIGNED) {
+		} else if (bt_field_class_type_is(BT_FIELD_CLASS_TYPE_SIGNED_INTEGER,
+										  data_class)) {
 			tep_get_field_val(NULL, trace_event, fields[j]->name, rec, &val, 0);
 			if (lttng)
 				val = lttng_get_field_val_from_event(trace_event, field_name,
 													 val);
-			bt_field_integer_signed_set_value(data_field, val);
+			bt_field_integer_signed_set_value(data_field, (int64_t)val);
+		} else if (bt_field_class_type_is(BT_FIELD_CLASS_TYPE_UNSIGNED_INTEGER,
+										  data_class)) {
+			tep_get_field_val(NULL, trace_event, fields[j]->name, rec, &val, 0);
+			if (lttng)
+				val = lttng_get_field_val_from_event(trace_event, field_name,
+													 val);
+			bt_field_integer_unsigned_set_value(data_field, (uint64_t)val);
 		} else {
-			tep_get_field_val(NULL, trace_event, fields[j]->name, rec, &val, 0);
-			if (lttng)
-				val = lttng_get_field_val_from_event(trace_event, field_name,
-													 val);
-			bt_field_integer_unsigned_set_value(data_field, val);
+			/* do nothing */
 		}
 	}
 	free(fields);
