@@ -470,6 +470,17 @@ int main(int argc, char **argv)
 	bt_plugin_get_version(ctf_plugin, &p_major, NULL, NULL, NULL);
 	bt_value *sink_params = bt_value_map_create();
 	bt_value_map_insert_string_entry(sink_params, "path", opts.out_dir);
+
+	/*
+	 * The CTF sink has very strict limitations regarding the time ranges of
+	 * discarded events. As these do not match the ranges reported by trace-cmd
+	 * (e.g. we cannot relate discarded events to packets), we just disable this
+	 * feature. For details, see
+	 * https://babeltrace.org/docs/v2.1/man7/babeltrace2-sink.ctf.fs.7
+	 */
+	bt_value_map_insert_bool_entry(sink_params, "ignore-discarded-events",
+								   true);
+
 	/* 
 	 * this parameter is only available from plugin version 2.1 on, but
 	 * the plugin registers as version 2.0.0 (on 2.1) and does not set a
