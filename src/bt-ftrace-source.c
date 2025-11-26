@@ -527,10 +527,12 @@ struct ftrace_in_message_iterator {
 	/* current packet instance */
 	bt_packet *packet;
 	uint64_t events_in_pkg;
+	/* we need to report n discarded events*/
+	long long events_discarded;
 
 	/* last processed record */
 	struct tep_record *rec;
-	uint64_t last_rec_ts;
+	unsigned long long last_rec_ts;
 
 	/* ftrace stream id (one per CPU) */
 	int cpu_id;
@@ -568,6 +570,7 @@ ftrace_in_message_iterator_initialize(
 	/* Set the message iterator's initial state */
 	ftrace_in_iter->state = FTRACE_IN_MESSAGE_ITERATOR_STATE_STREAM_BEGINNING;
 	ftrace_in_iter->events_in_pkg = 0;
+	ftrace_in_iter->events_discarded = 0;
 
 	/* Set the message iterator's user data to our private data structure */
 	bt_self_message_iterator_set_data(self_message_iterator, ftrace_in_iter);
@@ -613,6 +616,9 @@ create_message_from_event(struct ftrace_in_message_iterator *ftrace_in_iter,
 
 	const bt_bool supports_packets =
 		bt_stream_class_supports_packets(bt_stream_borrow_class_const(stream));
+	const bt_bool supports_discarded_events =
+		bt_stream_class_supports_discarded_events(
+			bt_stream_borrow_class_const(stream));
 
 	if (ftrace_in_iter->state ==
 		FTRACE_IN_MESSAGE_ITERATOR_STATE_STREAM_BEGINNING) {
@@ -626,8 +632,10 @@ create_message_from_event(struct ftrace_in_message_iterator *ftrace_in_iter,
 		return NULL;
 	}
 
-	if (!rec && supports_packets && ftrace_in_iter->packet) {
-		/* we need to close the packet */
+	/* close packet */
+	if (supports_packets && ftrace_in_iter->packet &&
+		(!rec || ftrace_in_iter->events_discarded ||
+		 ftrace_in_iter->events_in_pkg > MAX_EVENTS_PER_PACKET)) {
 		message = bt_message_packet_end_create_with_default_clock_snapshot(
 			self_message_iterator, ftrace_in_iter->packet,
 			ftrace_in_iter->last_rec_ts);
@@ -639,9 +647,22 @@ create_message_from_event(struct ftrace_in_message_iterator *ftrace_in_iter,
 		goto done;
 	}
 
-	/* memorize the last rec timestamp so we can use it in the end package message */
-	ftrace_in_iter->last_rec_ts = rec->ts;
+	/* discarded events packages may only be emitted between packets */
+	if (ftrace_in_iter->events_discarded) {
+		message =
+			bt_message_discarded_events_create_with_default_clock_snapshots(
+				self_message_iterator, stream, ftrace_in_iter->last_rec_ts,
+				rec->ts);
+		if (ftrace_in_iter->events_discarded != -1) {
+			bt_message_discarded_events_set_count(
+				message, ftrace_in_iter->events_discarded);
+		}
+		ftrace_in_iter->events_discarded = 0;
+		ftrace_in_iter->events_in_pkg++;
+		return message;
+	}
 
+	/* if we are not in a packet, start one */
 	if (supports_packets && !ftrace_in_iter->packet) {
 		bt_packet *packet = bt_packet_create(stream);
 		bt_field *context = bt_packet_borrow_context_field(packet);
@@ -654,13 +675,6 @@ create_message_from_event(struct ftrace_in_message_iterator *ftrace_in_iter,
 		message =
 			bt_message_packet_beginning_create_with_default_clock_snapshot(
 				self_message_iterator, packet, rec->ts);
-		return message;
-	} else if (supports_packets &&
-			   (ftrace_in_iter->events_in_pkg > MAX_EVENTS_PER_PACKET)) {
-		message = bt_message_packet_end_create_with_default_clock_snapshot(
-			self_message_iterator, ftrace_in_iter->packet,
-			ftrace_in_iter->last_rec_ts);
-		BT_PACKET_PUT_REF_AND_RESET(ftrace_in_iter->packet);
 		return message;
 	}
 
@@ -737,10 +751,19 @@ create_message_from_event(struct ftrace_in_message_iterator *ftrace_in_iter,
 
 	ftrace_in_iter->events_in_pkg++;
 
+	/*
+	 * Memorize the last rec timestamp so we can use it in the end package message
+	 * and in discarded event messages.
+	 */
+	ftrace_in_iter->last_rec_ts = rec->ts;
+
 	/* read next record */
 	tracecmd_free_record(rec);
 	ftrace_in_iter->rec = tracecmd_read_data(
 		ftrace_in_iter->ftrace_in->tc_input, ftrace_in_iter->cpu_id);
+	if (supports_discarded_events && ftrace_in_iter->rec) {
+		ftrace_in_iter->events_discarded = ftrace_in_iter->rec->missed_events;
+	}
 	return message;
 
 done:
