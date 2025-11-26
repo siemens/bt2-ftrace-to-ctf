@@ -187,8 +187,8 @@ static bt_event_class *create_event_class(bt_stream_class *stream_class,
 		if (bt_field_class_structure_borrow_member_by_name(payload_field_class,
 														   field_name)) {
 			BT_FTRACE_LOG_WARNING(loglvl,
-								  "   skip duplicated field %s, type: %s",
-								  field_name, fields[j]->type);
+								  "   skip duplicated field %s, type: %s on %s",
+								  field_name, fields[j]->type, NAME_BUF);
 		} else {
 			bt_field_class_structure_append_member(payload_field_class,
 												   field_name, field_class);
