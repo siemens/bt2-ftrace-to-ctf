@@ -656,8 +656,7 @@ create_message_from_event(struct ftrace_in_message_iterator *ftrace_in_iter,
 				self_message_iterator, packet, rec->ts);
 		return message;
 	} else if (supports_packets &&
-			   (rec->missed_events ||
-				ftrace_in_iter->events_in_pkg > MAX_EVENTS_PER_PACKET)) {
+			   (ftrace_in_iter->events_in_pkg > MAX_EVENTS_PER_PACKET)) {
 		message = bt_message_packet_end_create_with_default_clock_snapshot(
 			self_message_iterator, ftrace_in_iter->packet,
 			ftrace_in_iter->last_rec_ts);
