@@ -35,6 +35,15 @@ BT_PLUGIN_SOURCE_COMPONENT_CLASS_MESSAGE_ITERATOR_CLASS_INITIALIZE_METHOD(
 	tracedat, ftrace_in_message_iterator_initialize);
 BT_PLUGIN_SOURCE_COMPONENT_CLASS_MESSAGE_ITERATOR_CLASS_FINALIZE_METHOD(
 	tracedat, ftrace_in_message_iterator_finalize);
+
+/* seek interface */
+BT_PLUGIN_SOURCE_COMPONENT_CLASS_MESSAGE_ITERATOR_CLASS_SEEK_BEGINNING_METHODS(
+	tracedat, ftrace_in_message_iterator_seek_beginning,
+	ftrace_in_message_iterator_can_seek_beginning);
+BT_PLUGIN_SOURCE_COMPONENT_CLASS_MESSAGE_ITERATOR_CLASS_SEEK_NS_FROM_ORIGIN_METHODS(
+	tracedat, ftrace_in_message_iterator_seek_ns_from_origin,
+	ftrace_in_message_iterator_can_seek_ns_from_origin);
+
 BT_PLUGIN_SOURCE_COMPONENT_CLASS_GET_SUPPORTED_MIP_VERSIONS_METHOD(
 	tracedat, ftrace_get_supported_mip_versions);
 BT_PLUGIN_SOURCE_COMPONENT_CLASS_QUERY_METHOD(tracedat, ftrace_query_method);

@@ -21,6 +21,8 @@
  *   babeltrace2 --plugin-path=. query -p "inputs=[trace.dat]"
  *     source.ftrace.tracedat babeltrace.trace-infos
  *
+ * Seek in trace:
+ *   babeltrace2 trace.dat --begin=<> --end=<>
  */
 
 #define _GNU_SOURCE
@@ -571,6 +573,10 @@ ftrace_in_message_iterator_initialize(
 	ftrace_in_iter->events_in_pkg = 0;
 	ftrace_in_iter->events_discarded = 0;
 
+	/* the iterator supports seeking */
+	bt_self_message_iterator_configuration_set_can_seek_forward(configuration,
+																BT_TRUE);
+
 	/* Set the message iterator's user data to our private data structure */
 	bt_self_message_iterator_set_data(self_message_iterator, ftrace_in_iter);
 
@@ -805,6 +811,90 @@ ftrace_in_message_iterator_next(bt_self_message_iterator *self_message_iterator,
 		status = BT_MESSAGE_ITERATOR_CLASS_NEXT_METHOD_STATUS_OK;
 	}
 	return status;
+}
+
+bt_message_iterator_class_seek_beginning_method_status
+ftrace_in_message_iterator_seek_beginning(
+	bt_self_message_iterator *self_message_iterator)
+{
+	struct ftrace_in_message_iterator *ftrace_in_iter =
+		bt_self_message_iterator_get_data(self_message_iterator);
+
+	/* cleanup current state */
+	tracecmd_free_record(ftrace_in_iter->rec);
+	BT_PACKET_PUT_REF_AND_RESET(ftrace_in_iter->packet);
+
+	/* Set the message iterator's initial state */
+	ftrace_in_iter->rec = tracecmd_read_cpu_first(
+		ftrace_in_iter->ftrace_in->tc_input, ftrace_in_iter->cpu_id);
+
+	ftrace_in_iter->events_in_pkg = 0;
+	ftrace_in_iter->events_discarded = 0;
+	ftrace_in_iter->last_rec_ts = 0;
+	ftrace_in_iter->state = FTRACE_IN_MESSAGE_ITERATOR_STATE_STREAM_BEGINNING;
+
+	return BT_MESSAGE_ITERATOR_CLASS_SEEK_BEGINNING_METHOD_STATUS_OK;
+}
+
+bt_message_iterator_class_can_seek_beginning_method_status
+ftrace_in_message_iterator_can_seek_beginning(
+	bt_self_message_iterator *self_message_iterator, bt_bool *can_seek)
+{
+	*can_seek = BT_TRUE;
+	return BT_MESSAGE_ITERATOR_CLASS_CAN_SEEK_BEGINNING_METHOD_STATUS_OK;
+}
+
+bt_message_iterator_class_seek_ns_from_origin_method_status
+ftrace_in_message_iterator_seek_ns_from_origin(
+	bt_self_message_iterator *self_message_iterator, int64_t ns_from_origin)
+{
+	struct ftrace_in_message_iterator *ftrace_in_iter =
+		bt_self_message_iterator_get_data(self_message_iterator);
+
+	const bt_stream *stream =
+		ftrace_in_iter->ftrace_in->streams[ftrace_in_iter->cpu_id];
+	const bt_bool supports_discarded_events =
+		bt_stream_class_supports_discarded_events(
+			bt_stream_borrow_class_const(stream));
+
+	/* the cast is safe, as we only allow positive seeking anyways */
+	const uint64_t ns_from_orig_pos = (uint64_t)ns_from_origin;
+	if (ftrace_in_iter->last_rec_ts < ns_from_orig_pos) {
+		while (ftrace_in_iter->rec &&
+			   ftrace_in_iter->last_rec_ts < ns_from_orig_pos) {
+			tracecmd_free_record(ftrace_in_iter->rec);
+
+			ftrace_in_iter->rec = tracecmd_read_data(
+				ftrace_in_iter->ftrace_in->tc_input, ftrace_in_iter->cpu_id);
+			if (supports_discarded_events && ftrace_in_iter->rec) {
+				ftrace_in_iter->events_discarded =
+					ftrace_in_iter->rec->missed_events;
+			}
+		}
+	} else {
+		return BT_MESSAGE_ITERATOR_CLASS_SEEK_NS_FROM_ORIGIN_METHOD_STATUS_ERROR;
+	}
+
+	return BT_MESSAGE_ITERATOR_CLASS_SEEK_NS_FROM_ORIGIN_METHOD_STATUS_OK;
+}
+
+bt_message_iterator_class_can_seek_ns_from_origin_method_status
+ftrace_in_message_iterator_can_seek_ns_from_origin(
+	bt_self_message_iterator *self_message_iterator, int64_t ns_from_origin,
+	bt_bool *can_seek)
+{
+	struct ftrace_in_message_iterator *ftrace_in_iter =
+		bt_self_message_iterator_get_data(self_message_iterator);
+	/* we can only seek forward */
+	if (ns_from_origin < 0 ||
+		ftrace_in_iter->last_rec_ts > (uint64_t)ns_from_origin) {
+		BT_FTRACE_LOG_DEBUG(ftrace_in_iter->ftrace_in->log_level,
+							"cannot seek backwards");
+		*can_seek = BT_FALSE;
+	} else {
+		*can_seek = BT_TRUE;
+	}
+	return BT_MESSAGE_ITERATOR_CLASS_CAN_SEEK_NS_FROM_ORIGIN_METHOD_STATUS_OK;
 }
 
 bt_component_class_get_supported_mip_versions_method_status
