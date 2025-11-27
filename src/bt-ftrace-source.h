@@ -32,9 +32,3 @@ ftrace_get_supported_mip_versions(
 	const bt_value *const params, void *const initialize_method_data,
 	const bt_logging_level logging_level,
 	bt_integer_range_set_unsigned *const supported_versions);
-
-bt_component_class_query_method_status
-ftrace_query_method(bt_self_component_class_source *self_component_class,
-					bt_private_query_executor *query_executor,
-					const char *object_name, const bt_value *params,
-					void *method_data, const bt_value **result);

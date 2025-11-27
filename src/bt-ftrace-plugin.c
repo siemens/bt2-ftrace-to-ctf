@@ -9,6 +9,7 @@
 #include <babeltrace2/babeltrace.h>
 
 #include "bt-ftrace-source.h"
+#include "bt-ftrace-source-query.h"
 #include "bt-ftrace-tracemeta.h"
 
 /* Mandatory */
