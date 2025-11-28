@@ -519,8 +519,8 @@ int main(int argc, char **argv)
 	free(opts.end);
 
 	/* sink component */
-	unsigned int p_major = 0;
-	bt_plugin_get_version(ctf_plugin, &p_major, NULL, NULL, NULL);
+	unsigned int p_major = 0, p_minor = 0;
+	bt_plugin_get_version(ctf_plugin, &p_major, &p_minor, NULL, NULL);
 	bt_value *sink_params = bt_value_map_create();
 	bt_value_map_insert_string_entry(sink_params, "path", opts.out_dir);
 
@@ -544,6 +544,9 @@ int main(int argc, char **argv)
 										 opts.ctf_version);
 	} else if (strcmp(opts.ctf_version, "2") == 0) {
 		fprintf(stderr, "on babeltrace 2.0, only CTF 1.8 is supported.\n");
+	}
+	if (opts.lttng && p_major >= 2 && p_minor >= 1) {
+		bt_value_map_insert_bool_entry(sink_params, "create-lttng-index", true);
 	}
 	bt_graph_add_sink_component(graph, sink_cls, "fs", sink_params,
 								opts.loglevel, &sink);
