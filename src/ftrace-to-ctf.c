@@ -18,10 +18,12 @@
 
 /* Structure that holds the parsed options */
 typedef struct {
+	char *begin;
 	bool lttng;
 	char *ctf_version;
 	uint64_t clock_offset;
 	char *clock_uid;
+	char *end;
 	int mip;
 	char *trace_datetime;
 	char *trace_name;
@@ -47,8 +49,10 @@ static void print_usage(char *prog_name)
 		"Usage: %s [-clh] <trace.dat> [<lttng-trace>] <outdir>\n"
 		"\n"
 		"Options:\n"
+		"  -b, --begin <ts>      skip until (babeltrace2-filter.utils.trimmer begin input)\n"
 		"  -c, --ctf-version <v> CTF version to use (default: 1.8)\n"
 		"  -d, --trace-dt <name> ISO‑8601 timestamp of the trace\n"
+		"  -e, --end <ts>        trim after (babeltrace2-filter.utils.trimmer end input)\n"
 		"  -l, --lttng           Convert well-known events to LTTng representation (default: off)\n"
 		"  -n, --trace-name <name> Name of the trace (session)\n"
 		"  -o, --clock-offset <offset> Trace clock offset in ns to world clock\n"
@@ -87,9 +91,11 @@ int parse_args(int argc, char *argv[], prog_opts *opts)
 
 	// clang-format off
 	static const struct option long_opts[] = {
+		{ "begin",       required_argument, 0, 'b' },
 		{ "ctf-version", required_argument, 0 , 'c'},
 		{ "clock-offset", required_argument, 0, 'o'},
 		{ "clock-uid",   required_argument, 0, 'u' },
+		{ "end",         required_argument, 0, 'e' },
 		{ "lttng",       no_argument,       0, 'l' },
 		{ "trace-dt",    required_argument, 0, 'd' },
 		{ "trace-name",  required_argument, 0, 'n' },
@@ -102,14 +108,20 @@ int parse_args(int argc, char *argv[], prog_opts *opts)
 	int opt;
 	int opt_index = 0;
 
-	while ((opt = getopt_long(argc, argv, "c:d:ln:o:u:vh", long_opts,
+	while ((opt = getopt_long(argc, argv, "b:c:d:e:ln:o:u:vh", long_opts,
 							  &opt_index)) != -1) {
 		switch (opt) {
+		case 'b':
+			opts->begin = strdup(optarg);
+			break;
 		case 'c':
 			opts->ctf_version = optarg;
 			break;
 		case 'd':
 			opts->trace_datetime = strdup(optarg);
+			break;
+		case 'e':
+			opts->end = strdup(optarg);
 			break;
 		case 'l':
 			opts->lttng = true;
@@ -174,6 +186,23 @@ int parse_args(int argc, char *argv[], prog_opts *opts)
 	}
 
 	return 0;
+}
+
+/*
+ * Helper to insert a trimmer parameter.
+ * If the value can be parsed as a signed integer, insert it as such;
+ * otherwise insert it as a string.
+ */
+static void insert_trimmer_param(bt_value *params, const char *key,
+								 const char *value)
+{
+	char *endptr;
+	long long val = strtoll(value, &endptr, 10);
+	if (*endptr == '\0') {
+		bt_value_map_insert_signed_integer_entry(params, key, (int64_t)val);
+	} else {
+		bt_value_map_insert_string_entry(params, key, value);
+	}
 }
 
 const bt_plugin *load_plugin_by_name(char *name)
@@ -364,6 +393,7 @@ int main(int argc, char **argv)
 	const bt_component_source *source = NULL;
 	const bt_component_source *source_lttng = NULL;
 	const bt_component_filter *filter = NULL;
+	const bt_component_filter *trimmer = NULL;
 	const bt_component_sink *sink = NULL;
 
 	prog_opts opts;
@@ -379,6 +409,10 @@ int main(int argc, char **argv)
 	printf("  lttng-trace:  %s\n",
 		   opts.lttng_path ? opts.lttng_path : "not provided");
 	printf("  outdir  :     %s\n", opts.out_dir);
+	if (opts.begin || opts.end) {
+		printf("  begin  :     %s\n", opts.begin ? opts.begin : "not provided");
+		printf("  end    :     %s\n", opts.end ? opts.end : "not provided");
+	}
 
 	const bt_plugin *ftrace_plugin = load_plugin_by_name("ftrace");
 	if (!ftrace_plugin)
@@ -419,6 +453,10 @@ int main(int argc, char **argv)
 	const bt_component_class_filter *filter_cls =
 		bt_plugin_borrow_filter_component_class_by_name_const(utils_plugin,
 															  "muxer");
+
+	const bt_component_class_filter *trimmer_cls =
+		bt_plugin_borrow_filter_component_class_by_name_const(utils_plugin,
+															  "trimmer");
 
 	const bt_component_class_sink *sink_cls =
 		bt_plugin_borrow_sink_component_class_by_name_const(ctf_plugin, "fs");
@@ -464,6 +502,21 @@ int main(int argc, char **argv)
 
 	bt_graph_add_filter_component(graph, filter_cls, "muxer", NULL,
 								  opts.loglevel, &filter);
+
+	if (opts.begin || opts.end) {
+		bt_value *trimmer_params = bt_value_map_create();
+		if (opts.begin) {
+			insert_trimmer_param(trimmer_params, "begin", opts.begin);
+		}
+		if (opts.end) {
+			insert_trimmer_param(trimmer_params, "end", opts.end);
+		}
+		bt_graph_add_filter_component(graph, trimmer_cls, "trimmer",
+									  trimmer_params, opts.loglevel, &trimmer);
+		bt_value_put_ref(trimmer_params);
+	}
+	free(opts.begin);
+	free(opts.end);
 
 	/* sink component */
 	unsigned int p_major = 0;
@@ -524,6 +577,16 @@ int main(int argc, char **argv)
 		bt_component_filter_borrow_output_port_by_index_const(filter, 0);
 	const bt_port_input *s_in =
 		bt_component_sink_borrow_input_port_by_index_const(sink, 0);
+
+	if (trimmer) {
+		const bt_port_input *t_in =
+			bt_component_filter_borrow_input_port_by_index_const(trimmer, 0);
+		const bt_port_output *t_out =
+			bt_component_filter_borrow_output_port_by_index_const(trimmer, 0);
+		/* loop in the trimmer */
+		bt_graph_connect_ports(graph, f_out, t_in, NULL);
+		f_out = t_out;
+	}
 	bt_graph_connect_ports(graph, f_out, s_in, NULL);
 
 	bt_graph_run_once_status status;
