@@ -111,6 +111,38 @@ static void parse_tracedat_opts(struct ftrace_in *ftrace_in)
 #endif
 }
 
+static bt_field_class *
+create_event_field_class(bt_trace_class *trace_class,
+						 const struct tep_format_field *field,
+						 const struct ftrace_in *ftrace_in)
+{
+	const unsigned long flags = field->flags;
+	const bt_logging_level loglvl = ftrace_in->log_level;
+	bt_field_class *field_class = NULL;
+
+	if (flags & TEP_FIELD_IS_STRING) {
+		field_class = bt_field_class_string_create(trace_class);
+	} else if ((flags & TEP_FIELD_IS_POINTER || flags & TEP_FIELD_IS_DYNAMIC ||
+				flags & TEP_FIELD_IS_SYMBOLIC ||
+				flags & TEP_FIELD_IS_RELATIVE) ||
+			   field->size == 0 || field->size > 8) {
+		BT_FTRACE_LOG_DEBUG(loglvl, "   skip field %s, type: %s", field->name,
+							field->type);
+		/* TODO */
+		return NULL;
+	} else if (flags & TEP_FIELD_IS_SIGNED) {
+		field_class = bt_field_class_integer_signed_create(trace_class);
+		bt_field_class_integer_set_field_value_range(field_class,
+													 field->size * 8);
+	} else {
+		field_class = bt_field_class_integer_unsigned_create(trace_class);
+		bt_field_class_integer_set_field_value_range(field_class,
+													 field->size * 8);
+	}
+
+	return field_class;
+}
+
 /*
  * Creates an event class within `stream_class` from a ftrace event.
  */
@@ -161,30 +193,19 @@ static bt_event_class *create_event_class(bt_stream_class *stream_class,
 		}
 		const unsigned long flags = fields[j]->flags;
 		if (flags & TEP_FIELD_IS_STRING) {
-			field_class = bt_field_class_string_create(trace_class);
-		} else if ((flags & TEP_FIELD_IS_POINTER ||
-					flags & TEP_FIELD_IS_DYNAMIC ||
-					flags & TEP_FIELD_IS_SYMBOLIC ||
-					flags & TEP_FIELD_IS_RELATIVE) ||
-				   fields[j]->size == 0 || fields[j]->size > 8) {
-			BT_FTRACE_LOG_DEBUG(loglvl, "   skip field %s, type: %s",
-								field_name, fields[j]->type);
-			/* TODO */
-			continue;
+			/* strings are character arrays in tracefs, but we map them as strings */
+			field_class =
+				create_event_field_class(trace_class, fields[j], ftrace_in);
 		} else if (flags & TEP_FIELD_IS_ARRAY) {
-			BT_FTRACE_LOG_DEBUG(loglvl, "   skip field %s, type: %s",
-								field_name, fields[j]->type);
 			/* TODO */
 			continue;
-		} else if (flags & TEP_FIELD_IS_SIGNED) {
-			field_class = bt_field_class_integer_signed_create(trace_class);
-			bt_field_class_integer_set_field_value_range(field_class,
-														 fields[j]->size * 8);
 		} else {
-			field_class = bt_field_class_integer_unsigned_create(trace_class);
-			bt_field_class_integer_set_field_value_range(field_class,
-														 fields[j]->size * 8);
+			field_class =
+				create_event_field_class(trace_class, fields[j], ftrace_in);
 		}
+		if (!field_class)
+			continue;
+
 		if (bt_field_class_structure_borrow_member_by_name(payload_field_class,
 														   field_name)) {
 			BT_FTRACE_LOG_WARNING(loglvl,
