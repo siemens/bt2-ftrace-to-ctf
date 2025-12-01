@@ -87,7 +87,9 @@ jobs:
       - name: smoke test source.ftrace.tracedat
         env:
           BABELTRACE_PLUGIN_PATH: ${{ github.workspace }}/build
-        run: babeltrace2 trace.dat
+        run: |
+          babeltrace2 trace.dat
+          babeltrace2 trace.stack.dat
       - name: smoke test sink.ftrace.tracemeta
         env:
           BABELTRACE_PLUGIN_PATH: ${{ github.workspace }}/build
@@ -110,8 +112,13 @@ jobs:
           sudo apt-get install -y trace-cmd
 
       - name: generate trace.dat sample data
-        run: sudo trace-cmd record -C mono -e "sched:*" sleep 1
+        run: |
+          sudo trace-cmd record -C mono -e "sched:*" sleep 1
+          sudo trace-cmd record -C mono -T -e "sched:sched_switch" -o trace.stack.dat sleep 1
+
       - uses: actions/upload-artifact@v5
         with:
           name: trace-data
-          path: trace.dat
+          path: |
+            trace.dat
+            trace.stack.dat
