@@ -623,6 +623,21 @@ void ftrace_in_message_iterator_finalize(
 	free(ftrace_in_iter);
 }
 
+static int64_t convert_to_signed(uint64_t val, uint64_t bits)
+{
+	/* Compute the sign bit mask (1 << (bits‑1)). */
+	uint64_t sign_bit = UINT64_C(1) << (bits - 1);
+	/* Compute the full range mask (1 << bits) – used for two's‑complement
+	 * conversion when the sign bit is set. */
+	uint64_t full_range = UINT64_C(1) << bits;
+
+	if (val & sign_bit) {
+		/* Negative number in two's‑complement: subtract the full range. */
+		return (int64_t)(val - full_range);
+	}
+	return (int64_t)val;
+}
+
 /*
  * Process a single event, load the next trace record and update the internal
  * state machine.
@@ -728,6 +743,7 @@ create_message_from_event(struct ftrace_in_message_iterator *ftrace_in_iter,
 	bt_event *event = bt_message_event_borrow_event(message);
 	bt_field *payload_field = bt_event_borrow_payload_field(event);
 	bt_field *data_field = NULL;
+	const bt_field_class *data_class = bt_field_borrow_class_const(data_field);
 
 	fields = tep_event_fields(trace_event);
 	for (int j = 0; fields[j]; j++) {
@@ -748,22 +764,25 @@ create_message_from_event(struct ftrace_in_message_iterator *ftrace_in_iter,
 								trace_event->name);
 			continue;
 		}
-		const bt_field_class_type data_class =
+		const bt_field_class_type data_class_type =
 			bt_field_get_class_type(data_field);
-		if (bt_field_class_type_is(BT_FIELD_CLASS_TYPE_STRING, data_class)) {
+		if (bt_field_class_type_is(BT_FIELD_CLASS_TYPE_STRING,
+								   data_class_type)) {
 			int len;
 			char *strdata =
 				tep_get_field_raw(NULL, trace_event, field_name, rec, &len, 0);
 			bt_field_string_set_value(data_field, strdata);
 		} else if (bt_field_class_type_is(BT_FIELD_CLASS_TYPE_SIGNED_INTEGER,
-										  data_class)) {
+										  data_class_type)) {
 			tep_get_field_val(NULL, trace_event, fields[j]->name, rec, &val, 0);
 			if (lttng)
 				val = lttng_get_field_val_from_event(trace_event, field_name,
 													 val);
-			bt_field_integer_signed_set_value(data_field, (int64_t)val);
+			int64_t typed_val = convert_to_signed(
+				val, bt_field_class_integer_get_field_value_range(data_class));
+			bt_field_integer_signed_set_value(data_field, typed_val);
 		} else if (bt_field_class_type_is(BT_FIELD_CLASS_TYPE_UNSIGNED_INTEGER,
-										  data_class)) {
+										  data_class_type)) {
 			tep_get_field_val(NULL, trace_event, fields[j]->name, rec, &val, 0);
 			if (lttng)
 				val = lttng_get_field_val_from_event(trace_event, field_name,
