@@ -128,7 +128,6 @@ create_event_field_class(bt_trace_class *trace_class,
 	if (flags & TEP_FIELD_IS_STRING) {
 		field_class = bt_field_class_string_create(trace_class);
 	} else if ((flags & TEP_FIELD_IS_POINTER || flags & TEP_FIELD_IS_DYNAMIC ||
-				flags & TEP_FIELD_IS_SYMBOLIC ||
 				flags & TEP_FIELD_IS_RELATIVE) ||
 			   field_size == 0 || field_size > 8) {
 		BT_FTRACE_LOG_DEBUG(loglvl, "   skip field %s, type: %s", field->name,
