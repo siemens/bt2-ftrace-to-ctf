@@ -119,13 +119,18 @@ create_event_field_class(bt_trace_class *trace_class,
 	const unsigned long flags = field->flags;
 	const bt_logging_level loglvl = ftrace_in->log_level;
 	bt_field_class *field_class = NULL;
+	int field_size = field->size;
+
+	if (flags & TEP_FIELD_IS_ARRAY && field->arraylen) {
+		field_size = field_size / field->arraylen;
+	}
 
 	if (flags & TEP_FIELD_IS_STRING) {
 		field_class = bt_field_class_string_create(trace_class);
 	} else if ((flags & TEP_FIELD_IS_POINTER || flags & TEP_FIELD_IS_DYNAMIC ||
 				flags & TEP_FIELD_IS_SYMBOLIC ||
 				flags & TEP_FIELD_IS_RELATIVE) ||
-			   field->size == 0 || field->size > 8) {
+			   field_size == 0 || field_size > 8) {
 		BT_FTRACE_LOG_DEBUG(loglvl, "   skip field %s, type: %s", field->name,
 							field->type);
 		/* TODO */
@@ -133,11 +138,11 @@ create_event_field_class(bt_trace_class *trace_class,
 	} else if (flags & TEP_FIELD_IS_SIGNED) {
 		field_class = bt_field_class_integer_signed_create(trace_class);
 		bt_field_class_integer_set_field_value_range(field_class,
-													 field->size * 8);
+													 field_size * 8);
 	} else {
 		field_class = bt_field_class_integer_unsigned_create(trace_class);
 		bt_field_class_integer_set_field_value_range(field_class,
-													 field->size * 8);
+													 field_size * 8);
 	}
 
 	return field_class;
@@ -197,8 +202,14 @@ static bt_event_class *create_event_class(bt_stream_class *stream_class,
 			field_class =
 				create_event_field_class(trace_class, fields[j], ftrace_in);
 		} else if (flags & TEP_FIELD_IS_ARRAY) {
-			/* TODO */
-			continue;
+			bt_field_class *member_class =
+				create_event_field_class(trace_class, fields[j], ftrace_in);
+			if (!member_class)
+				continue;
+
+			field_class = bt_field_class_array_static_create(
+				trace_class, member_class, fields[j]->arraylen);
+			bt_field_class_put_ref(member_class);
 		} else {
 			field_class =
 				create_event_field_class(trace_class, fields[j], ftrace_in);
@@ -638,6 +649,97 @@ static int64_t convert_to_signed(uint64_t val, uint64_t bits)
 	return (int64_t)val;
 }
 
+static void set_message_field(struct ftrace_in_message_iterator *ftrace_in_iter,
+							  struct tep_event *trace_event,
+							  struct tep_record *rec,
+							  struct tep_format_field *field,
+							  bt_field *payload_field)
+{
+	const bt_bool lttng = ftrace_in_iter->ftrace_in->lttng_format;
+	const char *field_name;
+	bt_field *data_field = NULL;
+	unsigned long long val;
+
+	if (lttng) {
+		field_name = lttng_get_field_name_from_event(trace_event, field->name);
+	} else {
+		field_name = field->name;
+	}
+
+	data_field = bt_field_structure_borrow_member_field_by_name(payload_field,
+																field_name);
+	if (!data_field) {
+		BT_FTRACE_LOG_DEBUG(ftrace_in_iter->ftrace_in->log_level,
+							"skip unknown field \"%s\" on %s:%s", field_name,
+							trace_event->system, trace_event->name);
+		return;
+	}
+
+	const bt_field_class_type data_class_type =
+		bt_field_get_class_type(data_field);
+	const bt_field_class *data_class = bt_field_borrow_class_const(data_field);
+
+	if (bt_field_class_type_is(data_class_type,
+							   BT_FIELD_CLASS_TYPE_STATIC_ARRAY)) {
+		const bt_field_class *member_class =
+			bt_field_class_array_borrow_element_field_class_const(
+				bt_field_borrow_class_const(data_field));
+		const bt_field_class_type member_class_type =
+			bt_field_class_get_type(member_class);
+		/* we only support integer fields */
+		if (!bt_field_class_type_is(member_class_type,
+									BT_FIELD_CLASS_TYPE_INTEGER)) {
+			BT_FTRACE_LOG_ERROR(
+				ftrace_in_iter->ftrace_in->log_level,
+				"ignoring unsupported array field \"%s\" (type: \"%s\") on %s:%s",
+				field_name, field->type, trace_event->system,
+				trace_event->name);
+			return;
+		}
+		bool is_signed = bt_field_class_type_is(
+			member_class_type, BT_FIELD_CLASS_TYPE_SIGNED_INTEGER);
+		int len;
+		uint8_t *data_raw =
+			tep_get_field_raw(NULL, trace_event, field->name, rec, &len, 0);
+		const int n_items = field->arraylen;
+		const int item_size = len / n_items;
+		for (int i = 0; i < n_items; i++) {
+			uint64_t value = 0;
+			bt_field *array_field =
+				bt_field_array_borrow_element_field_by_index(data_field, i);
+			value = tep_read_number(trace_event->tep, data_raw, item_size);
+			if (is_signed) {
+				int64_t typed_val = convert_to_signed(
+					value,
+					bt_field_class_integer_get_field_value_range(member_class));
+				bt_field_integer_signed_set_value(array_field, typed_val);
+			} else {
+				bt_field_integer_unsigned_set_value(array_field, value);
+			}
+		}
+	} else if (bt_field_class_type_is(data_class_type,
+									  BT_FIELD_CLASS_TYPE_STRING)) {
+		int len;
+		char *strdata =
+			tep_get_field_raw(NULL, trace_event, field->name, rec, &len, 0);
+		bt_field_string_set_value(data_field, strdata);
+	} else if (bt_field_class_type_is(data_class_type,
+									  BT_FIELD_CLASS_TYPE_SIGNED_INTEGER)) {
+		tep_get_field_val(NULL, trace_event, field->name, rec, &val, 0);
+		int64_t typed_val = convert_to_signed(
+			val, bt_field_class_integer_get_field_value_range(data_class));
+		if (lttng)
+			val = lttng_get_field_val_from_event(trace_event, field_name, val);
+		bt_field_integer_signed_set_value(data_field, typed_val);
+	} else if (bt_field_class_type_is(data_class_type,
+									  BT_FIELD_CLASS_TYPE_UNSIGNED_INTEGER)) {
+		tep_get_field_val(NULL, trace_event, field->name, rec, &val, 0);
+		if (lttng)
+			val = lttng_get_field_val_from_event(trace_event, field_name, val);
+		bt_field_integer_unsigned_set_value(data_field, (uint64_t)val);
+	}
+}
+
 /*
  * Process a single event, load the next trace record and update the internal
  * state machine.
@@ -652,8 +754,6 @@ create_message_from_event(struct ftrace_in_message_iterator *ftrace_in_iter,
 	struct tep_record *rec = ftrace_in_iter->rec;
 	struct tep_event *trace_event;
 	struct tep_format_field **fields;
-	unsigned long long val;
-	const bt_bool lttng = ftrace_in_iter->ftrace_in->lttng_format;
 
 	const bt_bool supports_packets =
 		bt_stream_class_supports_packets(bt_stream_borrow_class_const(stream));
@@ -742,55 +842,11 @@ create_message_from_event(struct ftrace_in_message_iterator *ftrace_in_iter,
 	}
 	bt_event *event = bt_message_event_borrow_event(message);
 	bt_field *payload_field = bt_event_borrow_payload_field(event);
-	bt_field *data_field = NULL;
-	const bt_field_class *data_class = bt_field_borrow_class_const(data_field);
 
 	fields = tep_event_fields(trace_event);
 	for (int j = 0; fields[j]; j++) {
-		const char *field_name;
-		if (lttng) {
-			field_name =
-				lttng_get_field_name_from_event(trace_event, fields[j]->name);
-		} else {
-			field_name = fields[j]->name;
-		}
-
-		data_field = bt_field_structure_borrow_member_field_by_name(
-			payload_field, field_name);
-		if (!data_field) {
-			BT_FTRACE_LOG_DEBUG(ftrace_in_iter->ftrace_in->log_level,
-								"skip unknown field \"%s\" on %s:%s",
-								field_name, trace_event->system,
-								trace_event->name);
-			continue;
-		}
-		const bt_field_class_type data_class_type =
-			bt_field_get_class_type(data_field);
-		if (bt_field_class_type_is(BT_FIELD_CLASS_TYPE_STRING,
-								   data_class_type)) {
-			int len;
-			char *strdata =
-				tep_get_field_raw(NULL, trace_event, field_name, rec, &len, 0);
-			bt_field_string_set_value(data_field, strdata);
-		} else if (bt_field_class_type_is(BT_FIELD_CLASS_TYPE_SIGNED_INTEGER,
-										  data_class_type)) {
-			tep_get_field_val(NULL, trace_event, fields[j]->name, rec, &val, 0);
-			if (lttng)
-				val = lttng_get_field_val_from_event(trace_event, field_name,
-													 val);
-			int64_t typed_val = convert_to_signed(
-				val, bt_field_class_integer_get_field_value_range(data_class));
-			bt_field_integer_signed_set_value(data_field, typed_val);
-		} else if (bt_field_class_type_is(BT_FIELD_CLASS_TYPE_UNSIGNED_INTEGER,
-										  data_class_type)) {
-			tep_get_field_val(NULL, trace_event, fields[j]->name, rec, &val, 0);
-			if (lttng)
-				val = lttng_get_field_val_from_event(trace_event, field_name,
-													 val);
-			bt_field_integer_unsigned_set_value(data_field, (uint64_t)val);
-		} else {
-			/* do nothing */
-		}
+		set_message_field(ftrace_in_iter, trace_event, rec, fields[j],
+						  payload_field);
 	}
 	free(fields);
 
