@@ -127,7 +127,7 @@ create_event_field_class(bt_trace_class *trace_class,
 
 	if (flags & TEP_FIELD_IS_STRING) {
 		field_class = bt_field_class_string_create(trace_class);
-	} else if ((flags & TEP_FIELD_IS_POINTER || flags & TEP_FIELD_IS_DYNAMIC ||
+	} else if ((flags & TEP_FIELD_IS_DYNAMIC ||
 				flags & TEP_FIELD_IS_RELATIVE) ||
 			   field_size == 0 || field_size > 8) {
 		BT_FTRACE_LOG_DEBUG(loglvl, "   skip field %s, type: %s", field->name,
@@ -142,6 +142,15 @@ create_event_field_class(bt_trace_class *trace_class,
 		field_class = bt_field_class_integer_unsigned_create(trace_class);
 		bt_field_class_integer_set_field_value_range(field_class,
 													 field_size * 8);
+	}
+
+	/* set number formatting options */
+	bt_field_class_type field_class_type = bt_field_class_get_type(field_class);
+	if (flags & TEP_FIELD_IS_POINTER &&
+		bt_field_class_type_is(field_class_type, BT_FIELD_CLASS_TYPE_INTEGER)) {
+		bt_field_class_integer_set_preferred_display_base(
+			field_class,
+			BT_FIELD_CLASS_INTEGER_PREFERRED_DISPLAY_BASE_HEXADECIMAL);
 	}
 
 	return field_class;
