@@ -657,6 +657,34 @@ static int64_t convert_to_signed(uint64_t val, uint64_t bits)
 	return (int64_t)val;
 }
 
+static void
+set_message_field_value(struct ftrace_in_message_iterator *ftrace_in_iter,
+						struct tep_format_field *field, const char *field_name,
+						bt_field *data_field, const bt_field_class *data_class,
+						bt_field_class_type data_class_type, void *data,
+						int len)
+{
+	unsigned long long val;
+
+	if (bt_field_class_type_is(data_class_type, BT_FIELD_CLASS_TYPE_STRING)) {
+		bt_field_string_set_value(data_field, data);
+	} else if (bt_field_class_type_is(data_class_type,
+									  BT_FIELD_CLASS_TYPE_SIGNED_INTEGER)) {
+		val = tep_read_number(field->event->tep, data, len);
+		int64_t typed_val = convert_to_signed(
+			val, bt_field_class_integer_get_field_value_range(data_class));
+		if (ftrace_in_iter->ftrace_in->lttng_format)
+			val = lttng_get_field_val_from_event(field->event, field_name, val);
+		bt_field_integer_signed_set_value(data_field, typed_val);
+	} else if (bt_field_class_type_is(data_class_type,
+									  BT_FIELD_CLASS_TYPE_UNSIGNED_INTEGER)) {
+		val = tep_read_number(field->event->tep, data, len);
+		if (ftrace_in_iter->ftrace_in->lttng_format)
+			val = lttng_get_field_val_from_event(field->event, field_name, val);
+		bt_field_integer_unsigned_set_value(data_field, (uint64_t)val);
+	}
+}
+
 static void set_message_field(struct ftrace_in_message_iterator *ftrace_in_iter,
 							  struct tep_event *trace_event,
 							  struct tep_record *rec,
@@ -666,7 +694,8 @@ static void set_message_field(struct ftrace_in_message_iterator *ftrace_in_iter,
 	const bt_bool lttng = ftrace_in_iter->ftrace_in->lttng_format;
 	const char *field_name;
 	bt_field *data_field = NULL;
-	unsigned long long val;
+	int len = 0;
+	uint8_t *data_raw = NULL;
 
 	if (lttng) {
 		field_name = lttng_get_field_name_from_event(trace_event, field->name);
@@ -694,57 +723,23 @@ static void set_message_field(struct ftrace_in_message_iterator *ftrace_in_iter,
 				bt_field_borrow_class_const(data_field));
 		const bt_field_class_type member_class_type =
 			bt_field_class_get_type(member_class);
-		/* we only support integer fields */
-		if (!bt_field_class_type_is(member_class_type,
-									BT_FIELD_CLASS_TYPE_INTEGER)) {
-			BT_FTRACE_LOG_ERROR(
-				ftrace_in_iter->ftrace_in->log_level,
-				"ignoring unsupported array field \"%s\" (type: \"%s\") on %s:%s",
-				field_name, field->type, trace_event->system,
-				trace_event->name);
-			return;
-		}
-		bool is_signed = bt_field_class_type_is(
-			member_class_type, BT_FIELD_CLASS_TYPE_SIGNED_INTEGER);
-		int len;
-		uint8_t *data_raw =
+		data_raw =
 			tep_get_field_raw(NULL, trace_event, field->name, rec, &len, 0);
 		const int n_items = field->arraylen;
 		const int item_size = len / n_items;
 		for (int i = 0; i < n_items; i++) {
-			uint64_t value = 0;
-			bt_field *array_field =
+			bt_field *member_field =
 				bt_field_array_borrow_element_field_by_index(data_field, i);
-			value = tep_read_number(trace_event->tep, data_raw, item_size);
-			if (is_signed) {
-				int64_t typed_val = convert_to_signed(
-					value,
-					bt_field_class_integer_get_field_value_range(member_class));
-				bt_field_integer_signed_set_value(array_field, typed_val);
-			} else {
-				bt_field_integer_unsigned_set_value(array_field, value);
-			}
+			set_message_field_value(ftrace_in_iter, field, field_name,
+									member_field, member_class,
+									member_class_type, &data_raw[i * item_size],
+									item_size);
 		}
-	} else if (bt_field_class_type_is(data_class_type,
-									  BT_FIELD_CLASS_TYPE_STRING)) {
-		int len;
-		char *strdata =
+	} else {
+		data_raw =
 			tep_get_field_raw(NULL, trace_event, field->name, rec, &len, 0);
-		bt_field_string_set_value(data_field, strdata);
-	} else if (bt_field_class_type_is(data_class_type,
-									  BT_FIELD_CLASS_TYPE_SIGNED_INTEGER)) {
-		tep_get_field_val(NULL, trace_event, field->name, rec, &val, 0);
-		int64_t typed_val = convert_to_signed(
-			val, bt_field_class_integer_get_field_value_range(data_class));
-		if (lttng)
-			val = lttng_get_field_val_from_event(trace_event, field_name, val);
-		bt_field_integer_signed_set_value(data_field, typed_val);
-	} else if (bt_field_class_type_is(data_class_type,
-									  BT_FIELD_CLASS_TYPE_UNSIGNED_INTEGER)) {
-		tep_get_field_val(NULL, trace_event, field->name, rec, &val, 0);
-		if (lttng)
-			val = lttng_get_field_val_from_event(trace_event, field_name, val);
-		bt_field_integer_unsigned_set_value(data_field, (uint64_t)val);
+		set_message_field_value(ftrace_in_iter, field, field_name, data_field,
+								data_class, data_class_type, data_raw, len);
 	}
 }
 
