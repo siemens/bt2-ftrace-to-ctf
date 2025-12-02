@@ -28,8 +28,12 @@ const char *lttng_get_field_name_from_event(const struct tep_event *event,
  * the prio fields, whereby LTTng's priorities refer to the ones observed from
  * userspace.
  */
-unsigned long long lttng_get_field_val_from_event(const struct tep_event *event,
-												  const char *field_name,
-												  unsigned long long val);
+uint64_t lttng_get_field_val_from_event_unsigned(const struct tep_event *event,
+												 const char *field_name,
+												 uint64_t val);
+
+int64_t lttng_get_field_val_from_event_signed(const struct tep_event *event,
+											  const char *field_name,
+											  int64_t val);
 
 #endif

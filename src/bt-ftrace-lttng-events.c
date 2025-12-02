@@ -48,12 +48,19 @@ const char *lttng_get_field_name_from_event(const struct tep_event *event,
 	return lttng_field_name_replace_pid_by_tid(field_name);
 }
 
-unsigned long long lttng_get_field_val_from_event(const struct tep_event *event,
-												  const char *field_name,
-												  unsigned long long val)
+uint64_t lttng_get_field_val_from_event_unsigned(const struct tep_event *event,
+												 const char *field_name,
+												 uint64_t val)
+{
+	return val;
+}
+
+int64_t lttng_get_field_val_from_event_signed(const struct tep_event *event,
+											  const char *field_name,
+											  int64_t val)
 {
 	/* LTTng prios are shown as observed by userspace */
-	if (strstr(field_name, "prio")) {
+	if ((strcmp(event->system, "sched") == 0) && strstr(field_name, "prio")) {
 		return val - MAX_RT_PRIO;
 	}
 	return val;

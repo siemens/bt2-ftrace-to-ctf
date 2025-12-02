@@ -664,24 +664,24 @@ set_message_field_value(struct ftrace_in_message_iterator *ftrace_in_iter,
 						bt_field_class_type data_class_type, void *data,
 						int len)
 {
-	unsigned long long val;
-
 	if (bt_field_class_type_is(data_class_type, BT_FIELD_CLASS_TYPE_STRING)) {
 		bt_field_string_set_value(data_field, data);
 	} else if (bt_field_class_type_is(data_class_type,
 									  BT_FIELD_CLASS_TYPE_SIGNED_INTEGER)) {
-		val = tep_read_number(field->event->tep, data, len);
+		unsigned long long val = tep_read_number(field->event->tep, data, len);
 		int64_t typed_val = convert_to_signed(
 			val, bt_field_class_integer_get_field_value_range(data_class));
 		if (ftrace_in_iter->ftrace_in->lttng_format)
-			val = lttng_get_field_val_from_event(field->event, field_name, val);
+			typed_val = lttng_get_field_val_from_event_signed(
+				field->event, field_name, typed_val);
 		bt_field_integer_signed_set_value(data_field, typed_val);
 	} else if (bt_field_class_type_is(data_class_type,
 									  BT_FIELD_CLASS_TYPE_UNSIGNED_INTEGER)) {
-		val = tep_read_number(field->event->tep, data, len);
+		uint64_t typed_val = tep_read_number(field->event->tep, data, len);
 		if (ftrace_in_iter->ftrace_in->lttng_format)
-			val = lttng_get_field_val_from_event(field->event, field_name, val);
-		bt_field_integer_unsigned_set_value(data_field, (uint64_t)val);
+			typed_val = lttng_get_field_val_from_event_unsigned(
+				field->event, field_name, typed_val);
+		bt_field_integer_unsigned_set_value(data_field, typed_val);
 	}
 }
 
