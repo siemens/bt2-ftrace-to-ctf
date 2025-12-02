@@ -34,8 +34,14 @@ static const char *lttng_field_name_replace_pid_by_tid(const char *field_name)
 
 const char *lttng_get_event_name_from_event(const struct tep_event *event)
 {
+	static char outbuf[64];
+	if (strncmp("softirq", event->name, sizeof("softirq") - 1) == 0) {
+		snprintf(outbuf, sizeof(outbuf) - 1, "irq_%s", event->name);
+		return outbuf;
+	}
 	return event->name;
 }
+
 const char *lttng_get_field_name_from_event(const struct tep_event *event,
 											const char *field_name)
 {
