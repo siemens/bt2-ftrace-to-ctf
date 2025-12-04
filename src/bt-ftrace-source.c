@@ -331,6 +331,7 @@ static void create_metadata_and_stream(bt_self_component *self_component,
 		bt_field_class_structure_create(trace_class);
 	bt_field_class *field_cpuid_class =
 		bt_field_class_integer_unsigned_create(trace_class);
+	bt_field_class_integer_set_field_value_range(field_cpuid_class, 32);
 	bt_field_class_structure_append_member(packet_ctx_class, "cpu_id",
 										   field_cpuid_class);
 	bt_stream_class_set_packet_context_field_class(stream_class,
