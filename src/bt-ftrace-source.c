@@ -55,6 +55,18 @@
 /* ports private data */
 struct port_in {
 	int cpu_id;
+
+	/* weak reference */
+	struct tracecmd_input *tc_input;
+
+	/* Stream (owned by this) */
+	bt_stream *stream;
+};
+
+struct tc_buffer {
+	struct tracecmd_input *tc_input;
+	struct port_in *ports;
+	unsigned int nb_ports;
 };
 
 /* Source component's private data */
@@ -62,8 +74,9 @@ struct ftrace_in {
 	/* Logging */
 	bt_logging_level log_level;
 
-	/* kernel trace handles */
-	struct tracecmd_input *tc_input;
+	/* kernel trace buffer handles */
+	struct tc_buffer *tc_buffers;
+	unsigned int nb_tc_buffers;
 	struct tep_handle *tep;
 
 	/* use LTTng event names and semantics on well-known events */
@@ -82,16 +95,13 @@ struct ftrace_in {
 	uint64_t clock_offset_ns;
 	char *clock_uid;
 
-	/* Streams (owned by this) */
-	bt_stream **streams;
-	unsigned int nb_streams;
-
 	/* Event classes for each type of event (owned by this) */
 	GHashTable *event_classes;
 
-	/* Private data of output ports */
-	struct port_in **port_data;
-	unsigned int nb_port_data;
+	/* we only have a single stream class (as event classes are per system) */
+	bt_stream_class *stream_class;
+
+	bt_trace *trace;
 };
 
 /*
@@ -100,7 +110,7 @@ struct ftrace_in {
 static void parse_tracedat_opts(struct ftrace_in *ftrace_in)
 {
 #if WITH_TRACE_CMD_PRIVATE_SYMBOLS
-	const char *uname = tracecmd_get_uname(ftrace_in->tc_input);
+	const char *uname = tracecmd_get_uname(ftrace_in->tc_buffers[0].tc_input);
 	char *uname_copy = strdup(uname);
 	ftrace_in->trace_sysname = strdup(strtok(uname_copy, " "));
 	ftrace_in->trace_hostname = strdup(strtok(NULL, " "));
@@ -250,8 +260,8 @@ static bt_event_class *create_event_class(bt_stream_class *stream_class,
 /*
  * Creates the source component's metadata and stream objects.
  */
-static void create_metadata_and_stream(bt_self_component *self_component,
-									   struct ftrace_in *ftrace_in)
+static void create_metadata_and_trace(bt_self_component *self_component,
+									  struct ftrace_in *ftrace_in)
 {
 	char NAME_BUF[32];
 	const uint64_t mip_version =
@@ -267,8 +277,10 @@ static void create_metadata_and_stream(bt_self_component *self_component,
 	bt_stream_class *stream_class = bt_stream_class_create(trace_class);
 	bt_stream_class_set_name(stream_class, "ftrace-stream");
 
+	struct tracecmd_input *tc_main = ftrace_in->tc_buffers[0].tc_input;
+
 #if WITH_TRACE_CMD_PRIVATE_SYMBOLS
-	traceclock = tracecmd_get_trace_clock(ftrace_in->tc_input);
+	traceclock = tracecmd_get_trace_clock(tc_main);
 #endif
 	/* Create a default clock class (1 GHz frequency) */
 	bt_clock_class *clock_class = bt_clock_class_create(self_component);
@@ -340,12 +352,13 @@ static void create_metadata_and_stream(bt_self_component *self_component,
 	bt_field_class_put_ref(packet_ctx_class);
 #endif
 
-	/* Create the two event classes we need */
+	struct tep_handle *tep =
+		tracecmd_get_tep(ftrace_in->tc_buffers[0].tc_input);
 	struct tep_event **events = NULL;
 	ftrace_in->event_classes =
 		g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL,
 							  (GDestroyNotify)bt_event_class_put_ref);
-	events = tep_list_events(ftrace_in->tep, TEP_EVENT_SORT_ID);
+	events = tep_list_events(tep, TEP_EVENT_SORT_ID);
 	for (int i = 0; events[i]; i++) {
 		const bt_event_class *event_class =
 			create_event_class(stream_class, events[i], ftrace_in);
@@ -356,7 +369,7 @@ static void create_metadata_and_stream(bt_self_component *self_component,
 
 	/* Create a default trace from (instance of `trace_class`) */
 	bt_trace *trace = bt_trace_create(trace_class);
-	sprintf(NAME_BUF, "%llu", tracecmd_get_traceid(ftrace_in->tc_input));
+	sprintf(NAME_BUF, "%llu", tracecmd_get_traceid(tc_main));
 #if HAS_BT2_HAS_TRACE_UID
 	if (mip_version >= 2) {
 		bt_trace_set_uid(trace, NAME_BUF);
@@ -402,22 +415,52 @@ static void create_metadata_and_stream(bt_self_component *self_component,
 			ftrace_in->trace_creation_datetime);
 	}
 
-	/*
-	 * Create one stream per CPU stream in ftrace data
-	 */
-	const int ncpus = tep_get_cpus(ftrace_in->tep);
-	ftrace_in->nb_streams = ncpus;
-	ftrace_in->streams = calloc(ncpus, sizeof(bt_stream *));
+	ftrace_in->trace = trace;
+	ftrace_in->stream_class = stream_class;
+
+	bt_clock_class_put_ref(clock_class);
+	bt_trace_class_put_ref(trace_class);
+}
+
+static int
+setup_ports_for_trace_buffer(struct ftrace_in *ftrace_in,
+							 bt_self_component_source *self_component_source,
+							 struct tc_buffer *tc_buffer,
+							 const char *buffer_name, int buffer_index)
+{
+	char NAME_BUF[32];
+
+	struct tep_handle *tep = tracecmd_get_tep(tc_buffer->tc_input);
+	const int ncpus = tep_get_cpus(tep);
+	BT_FTRACE_LOG_INFO(ftrace_in->log_level,
+					   "the trace of buffer \"%s\"has %d CPUs", buffer_name,
+					   ncpus);
+
+	/* Add one output port per CPU stream */
+	tc_buffer->ports = calloc(ncpus, sizeof(struct port_in));
+	tc_buffer->nb_ports = ncpus;
 	for (int i = 0; i < ncpus; ++i) {
-		sprintf(NAME_BUF, "channel0_%d", i);
-		ftrace_in->streams[i] = bt_stream_create(stream_class, trace);
-		bt_stream_set_name(ftrace_in->streams[i], NAME_BUF);
+		struct port_in *pd = &tc_buffer->ports[i];
+
+		if (buffer_name) {
+			sprintf(NAME_BUF, "out-%s%d", buffer_name, i);
+		} else {
+			sprintf(NAME_BUF, "out%d", i);
+		}
+		pd->cpu_id = i;
+		pd->tc_input = tc_buffer->tc_input;
+
+		/* create stream */
+		sprintf(NAME_BUF, "channel%d_%d", buffer_index, pd->cpu_id);
+		pd->stream =
+			bt_stream_create(ftrace_in->stream_class, ftrace_in->trace);
+		bt_stream_set_name(pd->stream, NAME_BUF);
+
+		bt_self_component_source_add_output_port(self_component_source,
+												 NAME_BUF, pd, NULL);
 	}
 
-	bt_trace_put_ref(trace);
-	bt_clock_class_put_ref(clock_class);
-	bt_stream_class_put_ref(stream_class);
-	bt_trace_class_put_ref(trace_class);
+	return 0;
 }
 
 /*
@@ -428,9 +471,13 @@ ftrace_in_initialize(bt_self_component_source *self_component_source,
 					 bt_self_component_source_configuration *configuration,
 					 const bt_value *params, void *initialize_method_data)
 {
+	bt_self_component *self_component =
+		bt_self_component_source_as_self_component(self_component_source);
+
 	/* Allocate a private data structure */
-	char NAME_BUF[16];
 	struct ftrace_in *ftrace_in = calloc(1, sizeof(*ftrace_in));
+	bt_self_component_set_data(self_component, ftrace_in);
+
 	ftrace_in->tracer_version_major = FT_VERSION_MAJOR;
 	ftrace_in->tracer_version_minor = FT_VERSION_MINOR;
 	ftrace_in->log_level =
@@ -478,34 +525,41 @@ ftrace_in_initialize(bt_self_component_source *self_component_source,
 			strdup(bt_value_string_get(trace_date_val));
 	}
 
-	ftrace_in->tc_input = tracecmd_open(path, TRACECMD_FL_LOAD_NO_PLUGINS);
-	if (!ftrace_in->tc_input) {
+	struct tracecmd_input *tc_main =
+		tracecmd_open(path, TRACECMD_FL_LOAD_NO_PLUGINS);
+	if (!tc_main) {
 		free(ftrace_in);
 		return BT_COMPONENT_CLASS_INITIALIZE_METHOD_STATUS_ERROR;
 	}
-	ftrace_in->tep = tracecmd_get_tep(ftrace_in->tc_input);
-	const int ncpus = tep_get_cpus(ftrace_in->tep);
-	BT_FTRACE_LOG_INFO(ftrace_in->log_level, "the trace has %d CPUs", ncpus);
+	const int nbuffers = tracecmd_buffer_instances(tc_main);
+
+	ftrace_in->tc_buffers = calloc(nbuffers + 1, sizeof(struct tc_buffer));
+	/* first buffer is main buffer */
+	ftrace_in->tc_buffers[0].tc_input = tc_main;
 
 	parse_tracedat_opts(ftrace_in);
 
-	bt_self_component *self_component =
-		bt_self_component_source_as_self_component(self_component_source);
+	/* Create the source component's metadata and even + stream classes */
+	create_metadata_and_trace(self_component, ftrace_in);
 
-	/* Create the source component's metadata and stream objects */
-	create_metadata_and_stream(self_component, ftrace_in);
-	bt_self_component_set_data(self_component, ftrace_in);
+	/* main buffer */
+	setup_ports_for_trace_buffer(ftrace_in, self_component_source,
+								 ftrace_in->tc_buffers, NULL, 0);
 
-	/* Add one output port per CPU stream */
-	ftrace_in->port_data = calloc(ncpus, sizeof(struct port_in *));
-	ftrace_in->nb_port_data = ncpus;
-	for (int i = 0; i < ncpus; ++i) {
-		sprintf(NAME_BUF, "out%d", i);
-		ftrace_in->port_data[i] = calloc(1, sizeof(struct port_in));
-		struct port_in *port_priv = ftrace_in->port_data[i];
-		port_priv->cpu_id = i;
-		bt_self_component_source_add_output_port(self_component_source,
-												 NAME_BUF, port_priv, NULL);
+	/* sub buffers */
+	int ret = 0;
+	for (int i = 0; i < nbuffers && !ret; ++i) {
+		struct tc_buffer *subbuf = &ftrace_in->tc_buffers[i + 1];
+		subbuf->tc_input = tracecmd_buffer_instance_handle(tc_main, i);
+		const char *buffer_name = tracecmd_buffer_instance_name(tc_main, i);
+		ret = setup_ports_for_trace_buffer(ftrace_in, self_component_source,
+										   subbuf, buffer_name, i + 1);
+	}
+	ftrace_in->nb_tc_buffers = nbuffers + 1;
+
+	if (ret) {
+		/* TODO: cleanup */
+		return BT_COMPONENT_CLASS_INITIALIZE_METHOD_STATUS_ERROR;
 	}
 
 	return BT_COMPONENT_CLASS_INITIALIZE_METHOD_STATUS_OK;
@@ -526,20 +580,21 @@ void ftrace_in_finalize(bt_self_component_source *self_component_source)
 	struct ftrace_in *ftrace_in = bt_self_component_get_data(
 		bt_self_component_source_as_self_component(self_component_source));
 
-	tracecmd_close(ftrace_in->tc_input);
-
 	/* Put all references */
 	g_hash_table_unref(ftrace_in->event_classes);
-	for (unsigned i = 0; i < ftrace_in->nb_streams; ++i) {
-		bt_stream_put_ref(ftrace_in->streams[i]);
-	}
+	BT_STREAM_CLASS_PUT_REF_AND_RESET(ftrace_in->stream_class);
+	BT_TRACE_PUT_REF_AND_RESET(ftrace_in->trace);
 
-	/* Free the allocated structure */
-	free(ftrace_in->streams);
-	for (unsigned i = 0; i < ftrace_in->nb_port_data; ++i) {
-		free(ftrace_in->port_data[i]);
+	/* Free the per buffer data */
+	for (unsigned i = 0; i < ftrace_in->nb_tc_buffers; ++i) {
+		struct tc_buffer *buffer = &ftrace_in->tc_buffers[i];
+		for (unsigned j = 0; j < buffer->nb_ports; ++j) {
+			BT_STREAM_PUT_REF_AND_RESET(buffer->ports[j].stream);
+		}
+		free(buffer->ports);
+		tracecmd_close(buffer->tc_input);
 	}
-	free(ftrace_in->port_data);
+	free(ftrace_in->tc_buffers);
 	free(ftrace_in->clock_uid);
 	free(ftrace_in->trace_name);
 	free(ftrace_in->trace_hostname);
@@ -565,6 +620,7 @@ enum ftrace_in_message_iterator_state {
 struct ftrace_in_message_iterator {
 	/* (Weak) link to the component's private data */
 	struct ftrace_in *ftrace_in;
+	struct port_in *port_data;
 
 	/* current packet instance */
 	bt_packet *packet;
@@ -575,9 +631,6 @@ struct ftrace_in_message_iterator {
 	/* last processed record */
 	struct tep_record *rec;
 	unsigned long long last_rec_ts;
-
-	/* ftrace stream id (one per CPU) */
-	int cpu_id;
 
 	/* Current message iterator's state */
 	enum ftrace_in_message_iterator_state state;
@@ -605,9 +658,9 @@ ftrace_in_message_iterator_initialize(
 
 	/* Keep a link to the component's private data */
 	ftrace_in_iter->ftrace_in = ftrace_in;
-	ftrace_in_iter->cpu_id = port_data->cpu_id;
+	ftrace_in_iter->port_data = port_data;
 	ftrace_in_iter->rec =
-		tracecmd_read_cpu_first(ftrace_in->tc_input, ftrace_in_iter->cpu_id);
+		tracecmd_read_cpu_first(port_data->tc_input, port_data->cpu_id);
 
 	/* Set the message iterator's initial state */
 	ftrace_in_iter->state = FTRACE_IN_MESSAGE_ITERATOR_STATE_STREAM_BEGINNING;
@@ -753,8 +806,7 @@ create_message_from_event(struct ftrace_in_message_iterator *ftrace_in_iter,
 						  bt_self_message_iterator *self_message_iterator)
 {
 	bt_message *message;
-	bt_stream *stream =
-		ftrace_in_iter->ftrace_in->streams[ftrace_in_iter->cpu_id];
+	bt_stream *stream = ftrace_in_iter->port_data->stream;
 	struct tep_record *rec = ftrace_in_iter->rec;
 	struct tep_event *trace_event;
 	struct tep_format_field **fields;
@@ -823,7 +875,9 @@ create_message_from_event(struct ftrace_in_message_iterator *ftrace_in_iter,
 		return message;
 	}
 
-	trace_event = tep_find_event_by_record(ftrace_in_iter->ftrace_in->tep, rec);
+	struct tep_handle *tep =
+		tracecmd_get_tep(ftrace_in_iter->port_data->tc_input);
+	trace_event = tep_find_event_by_record(tep, rec);
 	if (!trace_event) {
 		/* TODO: skip */
 		BT_FTRACE_LOG_ERROR(ftrace_in_iter->ftrace_in->log_level,
@@ -865,7 +919,7 @@ create_message_from_event(struct ftrace_in_message_iterator *ftrace_in_iter,
 	/* read next record */
 	tracecmd_free_record(rec);
 	ftrace_in_iter->rec = tracecmd_read_data(
-		ftrace_in_iter->ftrace_in->tc_input, ftrace_in_iter->cpu_id);
+		ftrace_in_iter->port_data->tc_input, ftrace_in_iter->port_data->cpu_id);
 	if (supports_discarded_events && ftrace_in_iter->rec) {
 		ftrace_in_iter->events_discarded = ftrace_in_iter->rec->missed_events;
 	}
@@ -926,7 +980,7 @@ ftrace_in_message_iterator_seek_beginning(
 
 	/* Set the message iterator's initial state */
 	ftrace_in_iter->rec = tracecmd_read_cpu_first(
-		ftrace_in_iter->ftrace_in->tc_input, ftrace_in_iter->cpu_id);
+		ftrace_in_iter->port_data->tc_input, ftrace_in_iter->port_data->cpu_id);
 
 	ftrace_in_iter->events_in_pkg = 0;
 	ftrace_in_iter->events_discarded = 0;
@@ -951,8 +1005,7 @@ ftrace_in_message_iterator_seek_ns_from_origin(
 	struct ftrace_in_message_iterator *ftrace_in_iter =
 		bt_self_message_iterator_get_data(self_message_iterator);
 
-	const bt_stream *stream =
-		ftrace_in_iter->ftrace_in->streams[ftrace_in_iter->cpu_id];
+	const bt_stream *stream = ftrace_in_iter->port_data->stream;
 	const bt_bool supports_discarded_events =
 		bt_stream_class_supports_discarded_events(
 			bt_stream_borrow_class_const(stream));
@@ -964,8 +1017,9 @@ ftrace_in_message_iterator_seek_ns_from_origin(
 			   ftrace_in_iter->last_rec_ts < ns_from_orig_pos) {
 			tracecmd_free_record(ftrace_in_iter->rec);
 
-			ftrace_in_iter->rec = tracecmd_read_data(
-				ftrace_in_iter->ftrace_in->tc_input, ftrace_in_iter->cpu_id);
+			ftrace_in_iter->rec =
+				tracecmd_read_data(ftrace_in_iter->port_data->tc_input,
+								   ftrace_in_iter->port_data->cpu_id);
 			if (supports_discarded_events && ftrace_in_iter->rec) {
 				ftrace_in_iter->events_discarded =
 					ftrace_in_iter->rec->missed_events;

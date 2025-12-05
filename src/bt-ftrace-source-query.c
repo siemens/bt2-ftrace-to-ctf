@@ -58,41 +58,21 @@ static int get_last_record_ts_clbk(struct tracecmd_input *tc_input,
 }
 #endif
 
-/*
- * Implements the babeltrace.trace-infos query interface.
- */
-static bt_component_class_query_method_status
-ftrace_query_trace_infos(bt_self_component_class_source *self_component_class,
-						 bt_private_query_executor *query_executor,
-						 const bt_value *params, void *method_data,
-						 const bt_value **result)
+static void append_stream_infos(struct tracecmd_input *tc_input,
+								const char *buffer_name, bt_value *infos)
 {
 	char NAME_BUF[32];
-	const bt_value *inputs =
-		bt_value_map_borrow_entry_value_const(params, "inputs");
-	if (!inputs)
-		return BT_COMPONENT_CLASS_QUERY_METHOD_STATUS_ERROR;
-	if (!bt_value_is_array(inputs) || !bt_value_array_get_length(inputs))
-		return BT_COMPONENT_CLASS_QUERY_METHOD_STATUS_ERROR;
-	const bt_value *path_value =
-		bt_value_array_borrow_element_by_index_const(inputs, 0);
-	const char *path = bt_value_string_get(path_value);
-
-	struct tracecmd_input *tc_input =
-		tracecmd_open(path, TRACECMD_FL_LOAD_NO_PLUGINS);
-	if (!tc_input) {
-		return BT_COMPONENT_CLASS_QUERY_METHOD_STATUS_ERROR;
-	}
-
+	bt_value *streaminfo, *range;
+	const uint64_t ts_begin = tracecmd_get_first_ts(tc_input);
 	struct tep_handle *tep = tracecmd_get_tep(tc_input);
 	const int ncpus = tep_get_cpus(tep);
 
-	bt_value *response = bt_value_map_create();
-	bt_value *infos, *streaminfo, *range;
-	bt_value_map_insert_empty_array_entry(response, "stream-infos", &infos);
-	const uint64_t ts_begin = tracecmd_get_first_ts(tc_input);
 	for (int i = 0; i < ncpus; ++i) {
-		sprintf(NAME_BUF, "out%d", i);
+		if (buffer_name) {
+			sprintf(NAME_BUF, "out-%s%d", buffer_name, i);
+		} else {
+			sprintf(NAME_BUF, "out%d", i);
+		}
 		bt_value_array_append_empty_map_element(infos, &streaminfo);
 		bt_value_map_insert_string_entry(streaminfo, "port-name", NAME_BUF);
 		bt_value_map_insert_empty_map_entry(streaminfo, "range-ns", &range);
@@ -121,8 +101,50 @@ ftrace_query_trace_infos(bt_self_component_class_source *self_component_class,
 #endif
 		bt_value_map_insert_signed_integer_entry(range, "end-ns", ts_end);
 	}
+}
 
-	tracecmd_close(tc_input);
+/*
+ * Implements the babeltrace.trace-infos query interface.
+ */
+static bt_component_class_query_method_status
+ftrace_query_trace_infos(bt_self_component_class_source *self_component_class,
+						 bt_private_query_executor *query_executor,
+						 const bt_value *params, void *method_data,
+						 const bt_value **result)
+{
+	const bt_value *inputs =
+		bt_value_map_borrow_entry_value_const(params, "inputs");
+	if (!inputs)
+		return BT_COMPONENT_CLASS_QUERY_METHOD_STATUS_ERROR;
+	if (!bt_value_is_array(inputs) || !bt_value_array_get_length(inputs))
+		return BT_COMPONENT_CLASS_QUERY_METHOD_STATUS_ERROR;
+	const bt_value *path_value =
+		bt_value_array_borrow_element_by_index_const(inputs, 0);
+	const char *path = bt_value_string_get(path_value);
+
+	struct tracecmd_input *tc_main =
+		tracecmd_open(path, TRACECMD_FL_LOAD_NO_PLUGINS);
+	if (!tc_main) {
+		return BT_COMPONENT_CLASS_QUERY_METHOD_STATUS_ERROR;
+	}
+
+	bt_value *response = bt_value_map_create();
+	bt_value *infos;
+	bt_value_map_insert_empty_array_entry(response, "stream-infos", &infos);
+
+	/* main buffer */
+	append_stream_infos(tc_main, NULL, infos);
+
+	int nsubbuf = tracecmd_buffer_instances(tc_main);
+	for (int i = 0; i < nsubbuf; ++i) {
+		struct tracecmd_input *tc_sub =
+			tracecmd_buffer_instance_handle(tc_main, i);
+		const char *buf_name = tracecmd_buffer_instance_name(tc_main, i);
+		append_stream_infos(tc_sub, buf_name, infos);
+		tracecmd_close(tc_sub);
+	}
+
+	tracecmd_close(tc_main);
 	*result = response;
 	return BT_COMPONENT_CLASS_QUERY_METHOD_STATUS_OK;
 }
