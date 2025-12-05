@@ -12,6 +12,7 @@
 #include <event-parse.h>
 #include <babeltrace2/babeltrace.h>
 
+#include "config.h"
 #include "bt-ftrace-source-query.h"
 
 /*
