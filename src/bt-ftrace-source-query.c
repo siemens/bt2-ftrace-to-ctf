@@ -64,11 +64,18 @@ static void append_stream_infos(struct tracecmd_input *tc_input,
 {
 	char NAME_BUF[32];
 	bt_value *streaminfo, *range;
+	struct tep_record *rec = NULL;
 	const uint64_t ts_begin = tracecmd_get_first_ts(tc_input);
 	struct tep_handle *tep = tracecmd_get_tep(tc_input);
 	const int ncpus = tep_get_cpus(tep);
 
 	for (int i = 0; i < ncpus; ++i) {
+		/* if this stream is empty, do not create a port */
+		rec = tracecmd_read_cpu_first(tc_input, i);
+		if (!rec)
+			continue;
+		tracecmd_free_record(rec);
+
 		if (buffer_name) {
 			sprintf(NAME_BUF, "out-%s%d", buffer_name, i);
 		} else {
@@ -93,7 +100,7 @@ static void append_stream_infos(struct tracecmd_input *tc_input,
 										(void *)&ts_end, 0);
 #else
 		/* O(n) implementation iterating the whole trace file */
-		struct tep_record *rec = tracecmd_read_cpu_first(tc_input, i);
+		rec = tracecmd_read_cpu_first(tc_input, i);
 		while (rec) {
 			ts_end = rec->ts;
 			tracecmd_free_record(rec);
