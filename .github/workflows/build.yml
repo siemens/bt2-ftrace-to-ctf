@@ -90,6 +90,7 @@ jobs:
         run: |
           babeltrace2 trace.dat
           babeltrace2 trace.stack.dat
+          babeltrace2 trace.sub.dat
       - name: smoke test sink.ftrace.tracemeta
         env:
           BABELTRACE_PLUGIN_PATH: ${{ github.workspace }}/build
@@ -97,7 +98,9 @@ jobs:
       - name: smoke test query inteface
         env:
           BABELTRACE_PLUGIN_PATH: ${{ github.workspace }}/build
-        run: babeltrace2 query -p "inputs=[trace.dat]" source.ftrace.tracedat babeltrace.trace-infos
+        run: |
+          babeltrace2 query -p "inputs=[trace.dat]" source.ftrace.tracedat babeltrace.trace-infos
+          babeltrace2 query -p "inputs=[trace.sub.dat]" source.ftrace.tracedat babeltrace.trace-infos
       - name: smoke test ftrace-to-ctf
         env:
           BABELTRACE_PLUGIN_PATH: ${{ github.workspace }}/build
@@ -115,6 +118,7 @@ jobs:
         run: |
           sudo trace-cmd record -C mono -e "sched:*" sleep 1
           sudo trace-cmd record -C mono -T -e "sched:sched_switch" -o trace.stack.dat sleep 1
+          sudo trace-cmd record -C mono -e sched -B block -e block -B time -e timer -o trace.sub.dat sleep 1
 
       - uses: actions/upload-artifact@v5
         with:
@@ -122,3 +126,4 @@ jobs:
           path: |
             trace.dat
             trace.stack.dat
+            trace.sub.dat
