@@ -441,14 +441,21 @@ setup_ports_for_trace_buffer(struct ftrace_in *ftrace_in,
 	tc_buffer->nb_ports = ncpus;
 	for (int i = 0; i < ncpus; ++i) {
 		struct port_in *pd = &tc_buffer->ports[i];
+		pd->cpu_id = i;
+		pd->tc_input = tc_buffer->tc_input;
+
+		/* if this stream is empty, do not create a port */
+		struct tep_record *rec =
+			tracecmd_read_cpu_first(tc_buffer->tc_input, i);
+		if (!rec)
+			continue;
+		tracecmd_free_record(rec);
 
 		if (buffer_name) {
 			sprintf(NAME_BUF, "out-%s%d", buffer_name, i);
 		} else {
 			sprintf(NAME_BUF, "out%d", i);
 		}
-		pd->cpu_id = i;
-		pd->tc_input = tc_buffer->tc_input;
 
 		/* create stream */
 		sprintf(NAME_BUF, "channel%d_%d", buffer_index, pd->cpu_id);
