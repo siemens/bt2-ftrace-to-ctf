@@ -94,3 +94,5 @@ executable('ftrace-to-ctf',
   dependencies: [tracecmd_dep, traceevent_dep, babeltrace2_dep, json_glib_dep, uuid_dep],
   link_with: bt2_ftrace_plugin
 )
+
+subdir('man')
