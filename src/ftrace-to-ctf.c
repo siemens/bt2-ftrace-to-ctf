@@ -359,8 +359,33 @@ static int get_metadata_from_lttng_trace(const bt_plugin *ftrace_plugin,
 	bt_graph_connect_ports(graph, f_out, s_in, NULL);
 
 	/* execute (we are interested in a single stream-beginning message)*/
-	bt_graph_run_once(graph);
-	/* TODO: check status */
+	bt_graph_run_once_status run_status = bt_graph_run_once(graph);
+	int error_status = 0;
+	if(run_status == BT_GRAPH_RUN_ONCE_STATUS_ERROR)
+	{
+		printf("\nError running graph to get trace metadata\n");
+		error_status = -1;
+		return error_status;
+	}
+	if(run_status == BT_GRAPH_RUN_ONCE_STATUS_MEMORY_ERROR)
+	{
+		printf("\nMemory error running graph to get trace metadata\n");
+		error_status = -1;
+		return error_status;
+	}
+	if(run_status == BT_GRAPH_RUN_ONCE_STATUS_END)
+	{
+		printf("\nAll sink components are finished processing.\n");
+	}
+	if(run_status == BT_GRAPH_RUN_ONCE_STATUS_AGAIN)
+	{
+		printf("\nGraph needs to be run again to process all messages.\n");
+	}
+	if(run_status == BT_GRAPH_RUN_ONCE_STATUS_OK)
+	{
+		/* Successfully ran one iteration */
+		printf("\nGraph ran successfully to get trace metadata.\n\n");
+	}
 	BT_GRAPH_PUT_REF_AND_RESET(graph);
 	/* close writer end */
 	close(out_fds[1]);
