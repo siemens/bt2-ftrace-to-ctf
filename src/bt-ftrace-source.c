@@ -2,7 +2,7 @@
  * SPDX-FileCopyrightText: (C) 2025 Siemens
  * SPDX-License-Identifier: LGPL-2.1-or-later
  *
- * Minimal ftrace (trace.dat) source component for babeltrace
+ * ftrace (trace.dat) source component for babeltrace (source.ftrace.tracedat)
  * 
  * The source component uses the following initialization parameters:
  * 
@@ -13,16 +13,22 @@
  * "trace-name": string, optional: trace name and `env.trace_name` property
  * "trace-creation-datetime": string (ISO‑8601), optional: `env.trace_creation_datetime` property
  *
+ * The source component provides one output port per CPU flight record that
+ * has at least one event, according to the following pattern:
+ *
+ *   Main trace buffer: "out<cpuid>"
+ *   Sub buffers: "out-<name><cpuid>"
+ *
  * Example:
  *   trace-cmd record -C mono -e "sched:sched_switch" sleep 1
- *   babeltrace2 --plugin-path=. trace.dat
+ *   babeltrace2 trace.dat
  * 
  * Query babeltrace.trace-infos:
- *   babeltrace2 --plugin-path=. query -p "inputs=[trace.dat]"
+ *   babeltrace2 query -p "inputs=[trace.dat]"
  *     source.ftrace.tracedat babeltrace.trace-infos
  *
  * Seek in trace:
- *   babeltrace2 trace.dat --begin=<> --end=<>
+ *   babeltrace2 --begin=<> --end=<> trace.dat
  */
 
 #define _GNU_SOURCE
