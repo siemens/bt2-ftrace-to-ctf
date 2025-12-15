@@ -443,24 +443,47 @@ int main(int argc, char **argv)
 	const bt_component_class_source *source_cls =
 		bt_plugin_borrow_source_component_class_by_name_const(ftrace_plugin,
 															  "tracedat");
+	if(source_cls == NULL) {
+		fprintf(stderr, "cannot find source component class tracedat\n");
+		return -1;
+	}
 	const bt_component_class_source *source_lttng_cls;
 	if (opts.lttng_path) {
 		source_lttng_cls =
 			bt_plugin_borrow_source_component_class_by_name_const(ctf_plugin,
 																  "fs");
 	}
+	if(source_lttng_cls == NULL) {
+		fprintf(stderr, "cannot find source component class fs\n");
+		return -1;
+	}
 
 	const bt_component_class_filter *filter_cls =
 		bt_plugin_borrow_filter_component_class_by_name_const(utils_plugin,
 															  "muxer");
 
+	if (filter_cls == NULL)
+	{
+		fprintf(stderr, "cannot find filter component class muxer\n");
+		return -1;
+	}
+	
 	const bt_component_class_filter *trimmer_cls =
 		bt_plugin_borrow_filter_component_class_by_name_const(utils_plugin,
 															  "trimmer");
+	if( trimmer_cls == NULL ) {
+		fprintf(stderr, "cannot find filter component class trimmer\n");
+		return -1;
+	}
 
 	const bt_component_class_sink *sink_cls =
 		bt_plugin_borrow_sink_component_class_by_name_const(ctf_plugin, "fs");
-
+	if (sink_cls == NULL)
+	{
+		fprintf(stderr, "cannot find sink component class fs\n");
+		return -1;
+	}
+	
 	bt_graph *graph = bt_graph_create(opts.mip);
 
 	bt_value *inputs;
