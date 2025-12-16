@@ -439,13 +439,13 @@ int main(int argc, char **argv)
 		   opts.trace_name ? opts.trace_name : "not provided");
 
 	/* TODO: check and handle errors */
-
+	int error_status = 0;
 	const bt_component_class_source *source_cls =
 		bt_plugin_borrow_source_component_class_by_name_const(ftrace_plugin,
 															  "tracedat");
 	if(source_cls == NULL) {
-		fprintf(stderr, "cannot find source component class tracedat\n");
-		return -1;
+		fprintf(stderr, "cannot find source component class 'tracedat'\n");
+		error_status = -1;
 	}
 	const bt_component_class_source *source_lttng_cls;
 	if (opts.lttng_path) {
@@ -453,9 +453,10 @@ int main(int argc, char **argv)
 			bt_plugin_borrow_source_component_class_by_name_const(ctf_plugin,
 																  "fs");
 	}
+	
 	if(source_lttng_cls == NULL) {
-		fprintf(stderr, "cannot find source component class fs\n");
-		return -1;
+		fprintf(stderr, "cannot find source component class 'fs'\n");
+		error_status = -1;
 	}
 
 	const bt_component_class_filter *filter_cls =
@@ -464,16 +465,16 @@ int main(int argc, char **argv)
 
 	if (filter_cls == NULL)
 	{
-		fprintf(stderr, "cannot find filter component class muxer\n");
-		return -1;
+		fprintf(stderr, "cannot find filter component class 'muxer'\n");
+		error_status = -1;
 	}
 	
 	const bt_component_class_filter *trimmer_cls =
 		bt_plugin_borrow_filter_component_class_by_name_const(utils_plugin,
 															  "trimmer");
 	if( trimmer_cls == NULL ) {
-		fprintf(stderr, "cannot find filter component class trimmer\n");
-		return -1;
+		fprintf(stderr, "cannot find filter component class 'trimmer'\n");
+		error_status = -1;
 	}
 
 	const bt_component_class_sink *sink_cls =
@@ -481,9 +482,18 @@ int main(int argc, char **argv)
 	if (sink_cls == NULL)
 	{
 		fprintf(stderr, "cannot find sink component class fs\n");
-		return -1;
+		error_status = -1;
 	}
-	
+
+	if(error_status != 0) {
+		BT_PLUGIN_PUT_REF_AND_RESET(ftrace_plugin);
+		BT_PLUGIN_PUT_REF_AND_RESET(utils_plugin);
+		BT_PLUGIN_PUT_REF_AND_RESET(ctf_plugin);
+		free(opts.begin);
+		free(opts.end);
+		return error_status;
+	}
+
 	bt_graph *graph = bt_graph_create(opts.mip);
 
 	bt_value *inputs;
