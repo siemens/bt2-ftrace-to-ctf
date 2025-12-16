@@ -447,16 +447,17 @@ int main(int argc, char **argv)
 		fprintf(stderr, "cannot find source component class 'tracedat'\n");
 		error_status = -1;
 	}
+	
 	const bt_component_class_source *source_lttng_cls;
 	if (opts.lttng_path) {
 		source_lttng_cls =
 			bt_plugin_borrow_source_component_class_by_name_const(ctf_plugin,
 																  "fs");
-	}
-	
-	if(source_lttng_cls == NULL) {
-		fprintf(stderr, "cannot find source component class 'fs'\n");
-		error_status = -1;
+
+		if(source_lttng_cls == NULL) {
+			fprintf(stderr, "cannot find source component class 'fs'\n");
+			error_status = -1;
+		}
 	}
 
 	const bt_component_class_filter *filter_cls =
