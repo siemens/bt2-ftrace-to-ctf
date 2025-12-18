@@ -359,11 +359,24 @@ static int get_metadata_from_lttng_trace(const bt_plugin *ftrace_plugin,
 	bt_graph_connect_ports(graph, f_out, s_in, NULL);
 
 	/* execute (we are interested in a single stream-beginning message)*/
-	bt_graph_run_once(graph);
-	/* TODO: check status */
+	bt_graph_run_once_status run_status = bt_graph_run_once(graph);
+	int error_status = 0;
+	if (run_status == BT_GRAPH_RUN_ONCE_STATUS_ERROR) {
+		fprintf(stderr, "Error running graph to get trace metadata\n");
+		error_status = -1;
+	}
+	if (run_status == BT_GRAPH_RUN_ONCE_STATUS_MEMORY_ERROR) {
+		fprintf(stderr, "Memory error running graph to get trace metadata\n");
+		error_status = -1;
+	}
 	BT_GRAPH_PUT_REF_AND_RESET(graph);
 	/* close writer end */
 	close(out_fds[1]);
+	/* exits with error after cleanup */
+	if (error_status != 0) {
+		close(out_fds[0]);
+		return error_status;
+	}
 
 	FILE *fp = fdopen(out_fds[0], "r");
 	if (!fp) {
@@ -438,28 +451,58 @@ int main(int argc, char **argv)
 	printf("  trace-name:   %s\n",
 		   opts.trace_name ? opts.trace_name : "not provided");
 
-	/* TODO: check and handle errors */
-
+	int error_status = 0;
 	const bt_component_class_source *source_cls =
 		bt_plugin_borrow_source_component_class_by_name_const(ftrace_plugin,
 															  "tracedat");
+	if (source_cls == NULL) {
+		fprintf(stderr, "cannot find source component class 'tracedat'\n");
+		error_status = -1;
+	}
+
 	const bt_component_class_source *source_lttng_cls;
 	if (opts.lttng_path) {
 		source_lttng_cls =
 			bt_plugin_borrow_source_component_class_by_name_const(ctf_plugin,
 																  "fs");
+		if (source_lttng_cls == NULL) {
+			fprintf(stderr, "cannot find source component class 'fs'\n");
+			error_status = -1;
+		}
 	}
 
 	const bt_component_class_filter *filter_cls =
 		bt_plugin_borrow_filter_component_class_by_name_const(utils_plugin,
 															  "muxer");
+	if (filter_cls == NULL) {
+		fprintf(stderr, "cannot find filter component class 'muxer'\n");
+		error_status = -1;
+	}
 
 	const bt_component_class_filter *trimmer_cls =
 		bt_plugin_borrow_filter_component_class_by_name_const(utils_plugin,
 															  "trimmer");
+	if (trimmer_cls == NULL) {
+		fprintf(stderr, "cannot find filter component class 'trimmer'\n");
+		error_status = -1;
+	}
 
 	const bt_component_class_sink *sink_cls =
 		bt_plugin_borrow_sink_component_class_by_name_const(ctf_plugin, "fs");
+
+	if (sink_cls == NULL) {
+		fprintf(stderr, "cannot find sink component class 'fs'\n");
+		error_status = -1;
+	}
+
+	if (error_status != 0) {
+		BT_PLUGIN_PUT_REF_AND_RESET(ftrace_plugin);
+		BT_PLUGIN_PUT_REF_AND_RESET(utils_plugin);
+		BT_PLUGIN_PUT_REF_AND_RESET(ctf_plugin);
+		free(opts.begin);
+		free(opts.end);
+		return error_status;
+	}
 
 	bt_graph *graph = bt_graph_create(opts.mip);
 
