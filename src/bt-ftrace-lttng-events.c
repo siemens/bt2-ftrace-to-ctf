@@ -59,6 +59,12 @@ const char *lttng_get_event_name_from_event(const struct tep_event *event)
 {
 	if (event_system_is("irq", event) && !event_has_prefix("irq_", event)) {
 		return event_prefix_name("irq_", event);
+	} else if (event_system_is("timer", event) &&
+			   !event_has_prefix("timer_", event)) {
+		return event_prefix_name("timer_", event);
+	} else if (event_system_is("kmem", event) &&
+			   !event_has_prefix("kmem_", event)) {
+		return event_prefix_name("kmem_", event);
 	}
 	return event->name;
 }
