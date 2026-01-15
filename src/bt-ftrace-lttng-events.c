@@ -65,6 +65,9 @@ const char *lttng_get_event_name_from_event(const struct tep_event *event)
 	} else if (event_system_is("kmem", event) &&
 			   !event_has_prefix("kmem_", event)) {
 		return event_prefix_name("kmem_", event);
+	} else if (event_system_is("console", event) &&
+			   !event_has_prefix("console_", event)) {
+		return event_prefix_name("console_", event);
 	}
 	return event->name;
 }
