@@ -32,12 +32,33 @@ static const char *lttng_field_name_replace_pid_by_tid(const char *field_name)
 	return outbuf;
 }
 
-const char *lttng_get_event_name_from_event(const struct tep_event *event)
+static int event_has_prefix(const char *prefix, const struct tep_event *event)
+{
+	if (strncmp(prefix, event->name, strlen(prefix)) == 0) {
+		return true;
+	}
+	return false;
+}
+
+static int event_system_is(const char *name, const struct tep_event *event)
+{
+	if (strncmp(name, event->system, strlen(name)) == 0) {
+		return true;
+	}
+	return false;
+}
+
+const char *event_prefix_name(const char *prefix, const struct tep_event *event)
 {
 	static char outbuf[64];
-	if (strncmp("softirq", event->name, sizeof("softirq") - 1) == 0) {
-		snprintf(outbuf, sizeof(outbuf) - 1, "irq_%s", event->name);
-		return outbuf;
+	snprintf(outbuf, sizeof(outbuf) - 1, "%s%s", prefix, event->name);
+	return outbuf;
+}
+
+const char *lttng_get_event_name_from_event(const struct tep_event *event)
+{
+	if (event_system_is("irq", event) && !event_has_prefix("irq_", event)) {
+		return event_prefix_name("irq_", event);
 	}
 	return event->name;
 }
