@@ -46,7 +46,7 @@ static void print_usage(char *prog_name)
 {
 	fprintf(
 		stderr,
-		"Usage: %s [-clh] <trace.dat> [<lttng-trace>] <outdir>\n"
+		"Usage: %s [-bcdehlnouv] <trace.dat> [<lttng-trace>] <outdir>\n"
 		"\n"
 		"Options:\n"
 		"  -b, --begin <ts>      skip until (babeltrace2-filter.utils.trimmer begin input)\n"
