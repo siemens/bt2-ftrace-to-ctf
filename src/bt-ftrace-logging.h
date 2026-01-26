@@ -3,6 +3,9 @@
  * SPDX-License-Identifier: LGPL-2.1-or-later
  */
 
+#ifndef _BT_FTRACE_LOGGING_H
+#define _BT_FTRACE_LOGGING_H
+
 #include <babeltrace2/babeltrace.h>
 #include <stdio.h>
 
@@ -25,3 +28,5 @@
 #define BT_FTRACE_LOG_ERROR(self_level, msg, ...)                     \
 	BT_FTRACE_LOG(self_level, BT_LOGGING_LEVEL_ERROR, "error", msg, ##__VA_ARGS__)
 // clang-format on
+
+#endif

@@ -3,6 +3,9 @@
  * SPDX-License-Identifier: LGPL-2.1-or-later
  */
 
+#ifndef _BT_FTRACE_SOURCE_H
+#define _BT_FTRACE_SOURCE_H
+
 #include <babeltrace2/babeltrace.h>
 
 bt_component_class_initialize_method_status
@@ -48,3 +51,5 @@ ftrace_get_supported_mip_versions(
 	const bt_value *const params, void *const initialize_method_data,
 	const bt_logging_level logging_level,
 	bt_integer_range_set_unsigned *const supported_versions);
+
+#endif
