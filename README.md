@@ -24,6 +24,7 @@ The plugin uses the following initialization parameters:
 
 - "inputs": array of string, mandatory: providing exactly one input file path
 - "lttng": boolean, optional: indicating if LTTng semantics shall be used
+- "symbolize": boolean, optional: symbolize function addresses
 - "clock-offset": uint64, optional: trace clock offset from world clock in ns
 - "clock-uid": string, optional: UID or UUID of the trace clock
 - "trace-name": string, optional: trace name and `env.trace_name` property

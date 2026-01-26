@@ -20,6 +20,7 @@
 typedef struct {
 	char *begin;
 	bool lttng;
+	bool symbolize;
 	char *ctf_version;
 	uint64_t clock_offset;
 	char *clock_uid;
@@ -46,7 +47,7 @@ static void print_usage(char *prog_name)
 {
 	fprintf(
 		stderr,
-		"Usage: %s [-bcdehlnouv] <trace.dat> [<lttng-trace>] <outdir>\n"
+		"Usage: %s [-bcdehlnosuv] <trace.dat> [<lttng-trace>] <outdir>\n"
 		"\n"
 		"Options:\n"
 		"  -b, --begin <ts>      skip until (babeltrace2-filter.utils.trimmer begin input)\n"
@@ -56,6 +57,7 @@ static void print_usage(char *prog_name)
 		"  -l, --lttng           Convert well-known events to LTTng representation (default: off)\n"
 		"  -n, --trace-name <name> Name of the trace (session)\n"
 		"  -o, --clock-offset <offset> Trace clock offset in ns to world clock\n"
+		"  -s, --symbolize       Symbolize function addresses\n"
 		"  -u, --clock-uid <(u)uid> Trace clock uuid or uid, depending on MIP version\n"
 		"  -v, --verbose         Increase logging level (repeatable)\n"
 		"  -h, --help            Show this help message and exit\n",
@@ -95,6 +97,7 @@ int parse_args(int argc, char *argv[], prog_opts *opts)
 		{ "ctf-version", required_argument, 0 , 'c'},
 		{ "clock-offset", required_argument, 0, 'o'},
 		{ "clock-uid",   required_argument, 0, 'u' },
+		{ "symbolize",   no_argument,       0, 's' },
 		{ "end",         required_argument, 0, 'e' },
 		{ "lttng",       no_argument,       0, 'l' },
 		{ "trace-dt",    required_argument, 0, 'd' },
@@ -108,7 +111,7 @@ int parse_args(int argc, char *argv[], prog_opts *opts)
 	int opt;
 	int opt_index = 0;
 
-	while ((opt = getopt_long(argc, argv, "b:c:d:e:ln:o:u:vh", long_opts,
+	while ((opt = getopt_long(argc, argv, "b:c:d:e:ln:o:u:svh", long_opts,
 							  &opt_index)) != -1) {
 		switch (opt) {
 		case 'b':
@@ -134,6 +137,9 @@ int parse_args(int argc, char *argv[], prog_opts *opts)
 			break;
 		case 'u':
 			opts->clock_uid = strdup(optarg);
+			break;
+		case 's':
+			opts->symbolize = true;
 			break;
 		case 'v':
 			opts->loglevel = opts->loglevel > 0 ? opts->loglevel - 1 : 0;
@@ -511,6 +517,7 @@ int main(int argc, char **argv)
 	bt_value_map_insert_empty_array_entry(source_params, "inputs", &inputs);
 	bt_value_array_append_string_element(inputs, opts.trace_path);
 	bt_value_map_insert_bool_entry(source_params, "lttng", opts.lttng);
+	bt_value_map_insert_bool_entry(source_params, "symbolize", opts.symbolize);
 	bt_value_map_insert_unsigned_integer_entry(source_params, "clock-offset",
 											   opts.clock_offset);
 	if (opts.clock_uid) {

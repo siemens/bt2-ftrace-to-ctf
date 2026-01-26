@@ -8,6 +8,7 @@
  * 
  * "inputs": array of string, mandatory: providing exactly one input file path
  * "lttng": boolean, optional: indicating if LTTng semantics shall be used
+ * "symbolize": boolean, optional: symbolize function addresses
  * "clock-offset": uint64, optional: trace clock offset from world clock in ns
  * "clock-uid": string, optional: UID or UUID of the trace clock
  * "trace-name": string, optional: trace name and `env.trace_name` property
@@ -37,6 +38,8 @@
 #include "bt-ftrace-lttng-events.h"
 #include "bt-ftrace-logging.h"
 #include "bt-ftrace-source.h"
+#include "bt-ftrace-sym-field.h"
+#include "bt-ftrace-utils.h"
 #if WITH_TRACE_CMD_PRIVATE_SYMBOLS
 #include "trace-cmd-private.h"
 #endif
@@ -87,6 +90,8 @@ struct ftrace_in {
 
 	/* use LTTng event names and semantics on well-known events */
 	bt_bool lttng_format;
+	/* symbolize function addresses of well-known fields */
+	bt_bool symbolize_funcs;
 
 	/* tracer and trace metadata */
 	char *trace_name;
@@ -221,7 +226,10 @@ static bt_event_class *create_event_class(bt_stream_class *stream_class,
 			field_name = fields[j]->name;
 		}
 		const unsigned long flags = fields[j]->flags;
-		if (flags & TEP_FIELD_IS_STRING) {
+		if (ftrace_in->symbolize_funcs &&
+			event_field_is_symbolic(event, fields[j]->name)) {
+			field_class = bt_field_class_string_create(trace_class);
+		} else if (flags & TEP_FIELD_IS_STRING) {
 			/* strings are character arrays in tracefs, but we map them as strings */
 			field_class =
 				create_event_field_class(trace_class, fields[j], ftrace_in);
@@ -515,6 +523,11 @@ ftrace_in_initialize(bt_self_component_source *self_component_source,
 	if (lttng_val) {
 		ftrace_in->lttng_format = bt_value_bool_get(lttng_val);
 	}
+	const bt_value *symbolize_val =
+		bt_value_map_borrow_entry_value_const(params, "symbolize");
+	if (symbolize_val) {
+		ftrace_in->symbolize_funcs = bt_value_bool_get(symbolize_val);
+	}
 	const bt_value *clock_of_val =
 		bt_value_map_borrow_entry_value_const(params, "clock-offset");
 	if (clock_of_val) {
@@ -645,6 +658,9 @@ struct ftrace_in_message_iterator {
 	struct tep_record *rec;
 	unsigned long long last_rec_ts;
 
+	/* trace sequence buffer */
+	struct trace_seq seq;
+
 	/* Current message iterator's state */
 	enum ftrace_in_message_iterator_state state;
 };
@@ -674,6 +690,7 @@ ftrace_in_message_iterator_initialize(
 	ftrace_in_iter->port_data = port_data;
 	ftrace_in_iter->rec =
 		tracecmd_read_cpu_first(port_data->tc_input, port_data->cpu_id);
+	trace_seq_init(&ftrace_in_iter->seq);
 
 	/* Set the message iterator's initial state */
 	ftrace_in_iter->state = FTRACE_IN_MESSAGE_ITERATOR_STATE_STREAM_BEGINNING;
@@ -701,6 +718,7 @@ void ftrace_in_message_iterator_finalize(
 		bt_self_message_iterator_get_data(self_message_iterator);
 
 	tracecmd_free_record(ftrace_in_iter->rec);
+	trace_seq_destroy(&ftrace_in_iter->seq);
 
 	/* Redundant, as the packet is always closed when finishing the stream */
 	BT_PACKET_PUT_REF_AND_RESET(ftrace_in_iter->packet);
@@ -759,6 +777,7 @@ static void set_message_field(struct ftrace_in_message_iterator *ftrace_in_iter,
 							  bt_field *payload_field)
 {
 	const bt_bool lttng = ftrace_in_iter->ftrace_in->lttng_format;
+	const bt_bool symbolize = ftrace_in_iter->ftrace_in->symbolize_funcs;
 	const char *field_name;
 	bt_field *data_field = NULL;
 	int len = 0;
@@ -802,6 +821,9 @@ static void set_message_field(struct ftrace_in_message_iterator *ftrace_in_iter,
 									member_class_type, &data_raw[i * item_size],
 									item_size);
 		}
+	} else if (symbolize && event_field_is_symbolic(trace_event, field->name)) {
+		event_set_symbolic_field(field->event, rec, &ftrace_in_iter->seq,
+								 data_field, field->name);
 	} else {
 		data_raw =
 			tep_get_field_raw(NULL, trace_event, field->name, rec, &len, 0);
