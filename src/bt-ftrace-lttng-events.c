@@ -4,6 +4,7 @@
  */
 
 #include "bt-ftrace-lttng-events.h"
+#include "bt-ftrace-utils.h"
 
 #include <string.h>
 
@@ -30,22 +31,6 @@ static const char *lttng_field_name_replace_pid_by_tid(const char *field_name)
 		}
 	}
 	return outbuf;
-}
-
-static int event_has_prefix(const char *prefix, const struct tep_event *event)
-{
-	if (strncmp(prefix, event->name, strlen(prefix)) == 0) {
-		return true;
-	}
-	return false;
-}
-
-static int event_system_is(const char *name, const struct tep_event *event)
-{
-	if (strncmp(name, event->system, strlen(name)) == 0) {
-		return true;
-	}
-	return false;
 }
 
 const char *event_prefix_name(const char *prefix, const struct tep_event *event)
