@@ -214,20 +214,21 @@ static bt_event_class *create_event_class(bt_stream_class *stream_class,
 
 	fields = tep_event_fields(event);
 	for (int j = 0; fields[j]; j++) {
-		const char *field_name;
-		BT_FTRACE_LOG_DEBUG(loglvl, "  %s:%s:%d:%d|%d", fields[j]->name,
+		/* field name in input trace */
+		const char *field_name_in = fields[j]->name;
+		/* field name in output trace*/
+		const char *field_name_out = fields[j]->name;
+		BT_FTRACE_LOG_DEBUG(loglvl, "  %s:%s:%d:%d|%d", field_name_in,
 							fields[j]->type, fields[j]->offset, fields[j]->size,
 							fields[j]->arraylen);
 
 		if (ftrace_in->lttng_format) {
-			field_name =
-				lttng_get_field_name_from_event(event, fields[j]->name);
-		} else {
-			field_name = fields[j]->name;
+			field_name_out =
+				lttng_get_field_name_from_event(event, field_name_in);
 		}
 		const unsigned long flags = fields[j]->flags;
 		if (ftrace_in->symbolize_funcs &&
-			event_field_is_symbolic(event, fields[j]->name)) {
+			event_field_is_symbolic(event, field_name_in)) {
 			field_class = bt_field_class_string_create(trace_class);
 		} else if (flags & TEP_FIELD_IS_STRING) {
 			/* strings are character arrays in tracefs, but we map them as strings */
@@ -250,13 +251,13 @@ static bt_event_class *create_event_class(bt_stream_class *stream_class,
 			continue;
 
 		if (bt_field_class_structure_borrow_member_by_name(payload_field_class,
-														   field_name)) {
+														   field_name_out)) {
 			BT_FTRACE_LOG_WARNING(loglvl,
 								  "   skip duplicated field %s, type: %s on %s",
-								  field_name, fields[j]->type, NAME_BUF);
+								  field_name_out, fields[j]->type, NAME_BUF);
 		} else {
 			bt_field_class_structure_append_member(payload_field_class,
-												   field_name, field_class);
+												   field_name_out, field_class);
 		}
 		bt_field_class_put_ref(field_class);
 	}
