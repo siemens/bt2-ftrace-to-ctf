@@ -40,6 +40,27 @@ const char *event_prefix_name(const char *prefix, const struct tep_event *event)
 	return outbuf;
 }
 
+const char *event_syscall_prefix_name(const struct tep_event *event)
+{
+	static char outbuf[64];
+	const char *event_name = event->name;
+	const char *prefix = NULL;
+
+	if (!event_has_prefix("sys_", event))
+		return event_name;
+
+	if (event_has_prefix("sys_enter", event)) {
+		prefix = "syscall_entry";
+		event_name = event->name + 9;
+	} else {
+		prefix = "syscall_";
+		event_name = event->name + 4;
+	}
+
+	snprintf(outbuf, sizeof(outbuf) - 1, "%s%s", prefix, event_name);
+	return outbuf;
+}
+
 const char *lttng_get_event_name_from_event(const struct tep_event *event)
 {
 	if (event_system_is("irq", event) && !event_has_prefix("irq_", event)) {
@@ -53,6 +74,8 @@ const char *lttng_get_event_name_from_event(const struct tep_event *event)
 	} else if (event_system_is("console", event) &&
 			   !event_has_prefix("console_", event)) {
 		return event_prefix_name("console_", event);
+	} else if (event_system_is("syscalls", event)) {
+		return event_syscall_prefix_name(event);
 	}
 	return event->name;
 }
