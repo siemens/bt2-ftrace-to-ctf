@@ -224,12 +224,21 @@ static bt_event_class *create_event_class(bt_stream_class *stream_class,
 			field_name_out =
 				lttng_get_field_name_from_event(event, field_name_in);
 		}
-		if (strcmp(field_name_in, "common_pid") == 0) {
-			field_class =
-				create_event_field_class(trace_class, fields[j], ftrace_in);
-		} else {
+		if (strcmp(field_name_in, "common_pid") != 0) {
 			/* as of now only the common_pid is supported */
 			continue;
+		}
+		/* common_pid */
+		field_class =
+			create_event_field_class(trace_class, fields[j], ftrace_in);
+		bt_field_class_structure_append_member(context_field_class,
+											   field_name_out, field_class);
+		bt_field_class_put_ref(field_class);
+		/* comm name */
+		field_class = bt_field_class_string_create(trace_class);
+		field_name_out = "task";
+		if (ftrace_in->lttng_format) {
+			field_name_out = lttng_get_field_name_from_event(event, "task");
 		}
 		bt_field_class_structure_append_member(context_field_class,
 											   field_name_out, field_class);
@@ -837,7 +846,14 @@ static void set_message_field(struct ftrace_in_message_iterator *ftrace_in_iter,
 
 	if (is_common_field && strcmp(field->name, "common_pid") == 0) {
 		const int pid = tep_data_pid(trace_event->tep, rec);
+		const char *comm = tep_data_comm_from_pid(trace_event->tep, pid);
 		bt_field_integer_signed_set_value(data_field, pid);
+		field_name = lttng ?
+						 lttng_get_field_name_from_event(trace_event, "task") :
+						 "task";
+		data_field = bt_field_structure_borrow_member_field_by_name(
+			payload_field, field_name);
+		bt_field_string_set_value(data_field, comm);
 	} else if (bt_field_class_type_is(data_class_type,
 									  BT_FIELD_CLASS_TYPE_STATIC_ARRAY)) {
 		const bt_field_class *member_class =

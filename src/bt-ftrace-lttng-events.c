@@ -85,6 +85,8 @@ const char *lttng_get_field_name_from_event(const struct tep_event *event,
 {
 	if (strcmp(field_name, "common_pid") == 0)
 		return "tid";
+	if (strcmp(field_name, "task") == 0)
+		return "procname";
 	return lttng_field_name_replace_pid_by_tid(field_name);
 }
 
