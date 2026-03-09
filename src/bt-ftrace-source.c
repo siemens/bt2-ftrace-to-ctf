@@ -197,10 +197,12 @@ static bt_event_class *create_event_class(bt_stream_class *stream_class,
 	bt_event_class *event_class = bt_event_class_create(stream_class);
 
 	/*
-	* Create an empty structure field class to be used as the
-	* event class's payload field class.
+	* Create empty structure field classes to be used as the
+	* event class's payload / context field class.
 	*/
 	bt_field_class *payload_field_class =
+		bt_field_class_structure_create(trace_class);
+	bt_field_class *context_field_class =
 		bt_field_class_structure_create(trace_class);
 
 	/* Name the event class */
@@ -211,6 +213,29 @@ static bt_event_class *create_event_class(bt_stream_class *stream_class,
 	}
 	bt_event_class_set_name(event_class, NAME_BUF);
 	BT_FTRACE_LOG_INFO(loglvl, "create event %s", NAME_BUF);
+
+	/* common fields are specific context fields */
+	fields = tep_event_common_fields(event);
+	for (int j = 0; fields[j]; j++) {
+		const char *field_name_in = fields[j]->name;
+		const char *field_name_out = fields[j]->name;
+
+		if (ftrace_in->lttng_format) {
+			field_name_out =
+				lttng_get_field_name_from_event(event, field_name_in);
+		}
+		if (strcmp(field_name_in, "common_pid") == 0) {
+			field_class =
+				create_event_field_class(trace_class, fields[j], ftrace_in);
+		} else {
+			/* as of now only the common_pid is supported */
+			continue;
+		}
+		bt_field_class_structure_append_member(context_field_class,
+											   field_name_out, field_class);
+		bt_field_class_put_ref(field_class);
+	}
+	free(fields);
 
 	fields = tep_event_fields(event);
 	for (int j = 0; fields[j]; j++) {
@@ -267,11 +292,14 @@ static bt_event_class *create_event_class(bt_stream_class *stream_class,
 	}
 	free(fields);
 
-	/* Set the event class's payload field class */
+	/* Set the event class's payload / context field class */
 	bt_event_class_set_payload_field_class(event_class, payload_field_class);
+	bt_event_class_set_specific_context_field_class(event_class,
+													context_field_class);
 
 	/* Put the references we don't need anymore */
 	bt_field_class_put_ref(payload_field_class);
+	bt_field_class_put_ref(context_field_class);
 
 	return event_class;
 }
@@ -779,7 +807,7 @@ static void set_message_field(struct ftrace_in_message_iterator *ftrace_in_iter,
 							  struct tep_event *trace_event,
 							  struct tep_record *rec,
 							  struct tep_format_field *field,
-							  bt_field *payload_field)
+							  bt_field *payload_field, bt_bool is_common_field)
 {
 	const bt_bool lttng = ftrace_in_iter->ftrace_in->lttng_format;
 	const bt_bool symbolize = ftrace_in_iter->ftrace_in->symbolize_funcs;
@@ -807,8 +835,11 @@ static void set_message_field(struct ftrace_in_message_iterator *ftrace_in_iter,
 		bt_field_get_class_type(data_field);
 	const bt_field_class *data_class = bt_field_borrow_class_const(data_field);
 
-	if (bt_field_class_type_is(data_class_type,
-							   BT_FIELD_CLASS_TYPE_STATIC_ARRAY)) {
+	if (is_common_field && strcmp(field->name, "common_pid") == 0) {
+		const int pid = tep_data_pid(trace_event->tep, rec);
+		bt_field_integer_signed_set_value(data_field, pid);
+	} else if (bt_field_class_type_is(data_class_type,
+									  BT_FIELD_CLASS_TYPE_STATIC_ARRAY)) {
 		const bt_field_class *member_class =
 			bt_field_class_array_borrow_element_field_class_const(
 				bt_field_borrow_class_const(data_field));
@@ -940,11 +971,19 @@ create_message_from_event(struct ftrace_in_message_iterator *ftrace_in_iter,
 	}
 	bt_event *event = bt_message_event_borrow_event(message);
 	bt_field *payload_field = bt_event_borrow_payload_field(event);
+	bt_field *context_field = bt_event_borrow_specific_context_field(event);
+
+	fields = tep_event_common_fields(trace_event);
+	for (int j = 0; fields[j]; j++) {
+		set_message_field(ftrace_in_iter, trace_event, rec, fields[j],
+						  context_field, true);
+	}
+	free(fields);
 
 	fields = tep_event_fields(trace_event);
 	for (int j = 0; fields[j]; j++) {
 		set_message_field(ftrace_in_iter, trace_event, rec, fields[j],
-						  payload_field);
+						  payload_field, false);
 	}
 	free(fields);
 
