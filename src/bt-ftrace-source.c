@@ -223,6 +223,10 @@ static bt_event_class *create_event_class(bt_stream_class *stream_class,
 							fields[j]->arraylen);
 
 		if (ftrace_in->lttng_format) {
+			if (event_system_is("syscalls", event) &&
+				strcmp(field_name_in, "__syscall_nr") == 0)
+				continue;
+
 			field_name_out =
 				lttng_get_field_name_from_event(event, field_name_in);
 		}
