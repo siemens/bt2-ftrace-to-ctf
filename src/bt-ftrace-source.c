@@ -178,7 +178,9 @@ create_event_field_class(bt_trace_class *trace_class,
 }
 
 /*
- * Append common context fields (common_pid and task) to the context field class.
+ * Append common context fields to the context field class.
+ * The following fields are added (and must be set when adding a event instance)
+ * common_pid, task, latency
  */
 static void append_common_context_fields(bt_trace_class *trace_class,
 										 bt_field_class *context_field_class,
@@ -204,6 +206,12 @@ static void append_common_context_fields(bt_trace_class *trace_class,
 						 lttng_get_field_name_from_event(event, "task") :
 						 "task";
 	bt_field_class_structure_append_member(context_field_class, field_name_out,
+										   field_class);
+	bt_field_class_put_ref(field_class);
+
+	/* latency flags */
+	field_class = bt_field_class_string_create(trace_class);
+	bt_field_class_structure_append_member(context_field_class, "latency",
 										   field_class);
 	bt_field_class_put_ref(field_class);
 }
@@ -821,6 +829,7 @@ set_message_common_fields(struct ftrace_in_message_iterator *ftrace_in_iter,
 						  bt_field *context_field)
 {
 	const bt_bool lttng = ftrace_in_iter->ftrace_in->lttng_format;
+	struct trace_seq *seq = &ftrace_in_iter->seq;
 	bt_field *data_field = NULL;
 	const char *field_name = NULL;
 
@@ -838,6 +847,14 @@ set_message_common_fields(struct ftrace_in_message_iterator *ftrace_in_iter,
 	data_field = bt_field_structure_borrow_member_field_by_name(context_field,
 																field_name);
 	bt_field_string_set_value(data_field, comm);
+
+	/* latency */
+	data_field = bt_field_structure_borrow_member_field_by_name(context_field,
+																"latency");
+	trace_seq_reset(seq);
+	tep_print_event(trace_event->tep, seq, rec, "%s", TEP_PRINT_LATENCY);
+	trace_seq_terminate(seq);
+	bt_field_string_set_value(data_field, seq->buffer);
 }
 
 static void set_message_field(struct ftrace_in_message_iterator *ftrace_in_iter,
