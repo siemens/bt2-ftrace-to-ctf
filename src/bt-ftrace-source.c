@@ -178,6 +178,37 @@ create_event_field_class(bt_trace_class *trace_class,
 }
 
 /*
+ * Append common context fields (common_pid and task) to the context field class.
+ */
+static void append_common_context_fields(bt_trace_class *trace_class,
+										 bt_field_class *context_field_class,
+										 struct tep_event *event,
+										 const struct ftrace_in *ftrace_in)
+{
+	bt_field_class *field_class;
+	const char *field_name_out;
+
+	/* common_pid */
+	field_class = bt_field_class_integer_signed_create(trace_class);
+	bt_field_class_integer_set_field_value_range(field_class, 32);
+	field_name_out = ftrace_in->lttng_format ?
+						 lttng_get_field_name_from_event(event, "common_pid") :
+						 "common_pid";
+	bt_field_class_structure_append_member(context_field_class, field_name_out,
+										   field_class);
+	bt_field_class_put_ref(field_class);
+
+	/* comm name */
+	field_class = bt_field_class_string_create(trace_class);
+	field_name_out = ftrace_in->lttng_format ?
+						 lttng_get_field_name_from_event(event, "task") :
+						 "task";
+	bt_field_class_structure_append_member(context_field_class, field_name_out,
+										   field_class);
+	bt_field_class_put_ref(field_class);
+}
+
+/*
  * Creates an event class within `stream_class` from a ftrace event.
  */
 static bt_event_class *create_event_class(bt_stream_class *stream_class,
@@ -215,36 +246,8 @@ static bt_event_class *create_event_class(bt_stream_class *stream_class,
 	BT_FTRACE_LOG_INFO(loglvl, "create event %s", NAME_BUF);
 
 	/* common fields are specific context fields */
-	fields = tep_event_common_fields(event);
-	for (int j = 0; fields[j]; j++) {
-		const char *field_name_in = fields[j]->name;
-		const char *field_name_out = fields[j]->name;
-
-		if (ftrace_in->lttng_format) {
-			field_name_out =
-				lttng_get_field_name_from_event(event, field_name_in);
-		}
-		if (strcmp(field_name_in, "common_pid") != 0) {
-			/* as of now only the common_pid is supported */
-			continue;
-		}
-		/* common_pid */
-		field_class =
-			create_event_field_class(trace_class, fields[j], ftrace_in);
-		bt_field_class_structure_append_member(context_field_class,
-											   field_name_out, field_class);
-		bt_field_class_put_ref(field_class);
-		/* comm name */
-		field_class = bt_field_class_string_create(trace_class);
-		field_name_out = "task";
-		if (ftrace_in->lttng_format) {
-			field_name_out = lttng_get_field_name_from_event(event, "task");
-		}
-		bt_field_class_structure_append_member(context_field_class,
-											   field_name_out, field_class);
-		bt_field_class_put_ref(field_class);
-	}
-	free(fields);
+	append_common_context_fields(trace_class, context_field_class, event,
+								 ftrace_in);
 
 	fields = tep_event_fields(event);
 	for (int j = 0; fields[j]; j++) {
@@ -812,11 +815,36 @@ set_message_field_value(struct ftrace_in_message_iterator *ftrace_in_iter,
 	}
 }
 
+static void
+set_message_common_fields(struct ftrace_in_message_iterator *ftrace_in_iter,
+						  struct tep_event *trace_event, struct tep_record *rec,
+						  bt_field *context_field)
+{
+	const bt_bool lttng = ftrace_in_iter->ftrace_in->lttng_format;
+	bt_field *data_field = NULL;
+	const char *field_name = NULL;
+
+	/* common_pid  / task */
+	field_name =
+		lttng ? lttng_get_field_name_from_event(trace_event, "common_pid") :
+				"common_pid";
+	data_field = bt_field_structure_borrow_member_field_by_name(context_field,
+																field_name);
+	const int pid = tep_data_pid(trace_event->tep, rec);
+	const char *comm = tep_data_comm_from_pid(trace_event->tep, pid);
+	bt_field_integer_signed_set_value(data_field, pid);
+	field_name = lttng ? lttng_get_field_name_from_event(trace_event, "task") :
+						 "task";
+	data_field = bt_field_structure_borrow_member_field_by_name(context_field,
+																field_name);
+	bt_field_string_set_value(data_field, comm);
+}
+
 static void set_message_field(struct ftrace_in_message_iterator *ftrace_in_iter,
 							  struct tep_event *trace_event,
 							  struct tep_record *rec,
 							  struct tep_format_field *field,
-							  bt_field *payload_field, bt_bool is_common_field)
+							  bt_field *payload_field)
 {
 	const bt_bool lttng = ftrace_in_iter->ftrace_in->lttng_format;
 	const bt_bool symbolize = ftrace_in_iter->ftrace_in->symbolize_funcs;
@@ -844,18 +872,8 @@ static void set_message_field(struct ftrace_in_message_iterator *ftrace_in_iter,
 		bt_field_get_class_type(data_field);
 	const bt_field_class *data_class = bt_field_borrow_class_const(data_field);
 
-	if (is_common_field && strcmp(field->name, "common_pid") == 0) {
-		const int pid = tep_data_pid(trace_event->tep, rec);
-		const char *comm = tep_data_comm_from_pid(trace_event->tep, pid);
-		bt_field_integer_signed_set_value(data_field, pid);
-		field_name = lttng ?
-						 lttng_get_field_name_from_event(trace_event, "task") :
-						 "task";
-		data_field = bt_field_structure_borrow_member_field_by_name(
-			payload_field, field_name);
-		bt_field_string_set_value(data_field, comm);
-	} else if (bt_field_class_type_is(data_class_type,
-									  BT_FIELD_CLASS_TYPE_STATIC_ARRAY)) {
+	if (bt_field_class_type_is(data_class_type,
+							   BT_FIELD_CLASS_TYPE_STATIC_ARRAY)) {
 		const bt_field_class *member_class =
 			bt_field_class_array_borrow_element_field_class_const(
 				bt_field_borrow_class_const(data_field));
@@ -989,17 +1007,14 @@ create_message_from_event(struct ftrace_in_message_iterator *ftrace_in_iter,
 	bt_field *payload_field = bt_event_borrow_payload_field(event);
 	bt_field *context_field = bt_event_borrow_specific_context_field(event);
 
-	fields = tep_event_common_fields(trace_event);
-	for (int j = 0; fields[j]; j++) {
-		set_message_field(ftrace_in_iter, trace_event, rec, fields[j],
-						  context_field, true);
-	}
-	free(fields);
+	/* common fields (event context) */
+	set_message_common_fields(ftrace_in_iter, trace_event, rec, context_field);
 
+	/* specific fields */
 	fields = tep_event_fields(trace_event);
 	for (int j = 0; fields[j]; j++) {
 		set_message_field(ftrace_in_iter, trace_event, rec, fields[j],
-						  payload_field, false);
+						  payload_field);
 	}
 	free(fields);
 
