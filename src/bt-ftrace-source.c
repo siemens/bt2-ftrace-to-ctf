@@ -123,9 +123,15 @@ static void parse_tracedat_opts(struct ftrace_in *ftrace_in)
 #if WITH_TRACE_CMD_PRIVATE_SYMBOLS
 	const char *uname = tracecmd_get_uname(ftrace_in->tc_buffers[0].tc_input);
 	char *uname_copy = strdup(uname);
-	ftrace_in->trace_sysname = strdup(strtok(uname_copy, " "));
-	ftrace_in->trace_hostname = strdup(strtok(NULL, " "));
-	ftrace_in->trace_kernel_release = strdup(strtok(NULL, " "));
+	char *saveptr = NULL;
+	char *tok;
+
+	tok = strtok_r(uname_copy, " ", &saveptr);
+	ftrace_in->trace_sysname = tok ? strdup(tok) : strdup("Linux");
+	tok = tok ? strtok_r(NULL, " ", &saveptr) : NULL;
+	ftrace_in->trace_hostname = tok ? strdup(tok) : NULL;
+	tok = tok ? strtok_r(NULL, " ", &saveptr) : NULL;
+	ftrace_in->trace_kernel_release = tok ? strdup(tok) : NULL;
 	free(uname_copy);
 #else
 	ftrace_in->trace_sysname = strdup("Linux");
