@@ -437,7 +437,7 @@ static void create_metadata_and_trace(bt_self_component *self_component,
 	/* Create a default trace from (instance of `trace_class`) */
 	bt_trace *trace = bt_trace_create(trace_class);
 	sprintf(NAME_BUF, "%llu", tracecmd_get_traceid(tc_main));
-#if HAS_BT2_HAS_TRACE_UID
+#if HAS_BT2_TRACE_UID
 	if (mip_version >= 2) {
 		bt_trace_set_uid(trace, NAME_BUF);
 	}
