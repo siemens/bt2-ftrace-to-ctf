@@ -546,6 +546,21 @@ setup_ports_for_trace_buffer(struct ftrace_in *ftrace_in,
 }
 
 /*
+ * Free all owned strings in ftrace_in and the struct itself.
+ */
+static void ftrace_in_free(struct ftrace_in *ftrace_in)
+{
+	free(ftrace_in->tc_buffers);
+	free(ftrace_in->clock_uid);
+	free(ftrace_in->trace_name);
+	free(ftrace_in->trace_hostname);
+	free(ftrace_in->trace_sysname);
+	free(ftrace_in->trace_kernel_release);
+	free(ftrace_in->trace_creation_datetime);
+	free(ftrace_in);
+}
+
+/*
  * Initializes the source component.
  */
 bt_component_class_initialize_method_status
@@ -615,7 +630,7 @@ ftrace_in_initialize(bt_self_component_source *self_component_source,
 	struct tracecmd_input *tc_main =
 		tracecmd_open(path, TRACECMD_FL_LOAD_NO_PLUGINS);
 	if (!tc_main) {
-		free(ftrace_in);
+		ftrace_in_free(ftrace_in);
 		return BT_COMPONENT_CLASS_INITIALIZE_METHOD_STATUS_ERROR;
 	}
 	const int nbuffers = tracecmd_buffer_instances(tc_main);
@@ -654,7 +669,7 @@ ftrace_in_initialize(bt_self_component_source *self_component_source,
 param_error:
 	BT_FTRACE_LOG_ERROR(ftrace_in->log_level,
 						"ftrace source: missing mandatory parameter inputs");
-	free(ftrace_in);
+	ftrace_in_free(ftrace_in);
 	return BT_COMPONENT_CLASS_INITIALIZE_METHOD_STATUS_ERROR;
 }
 
@@ -681,14 +696,7 @@ void ftrace_in_finalize(bt_self_component_source *self_component_source)
 		free(buffer->ports);
 		tracecmd_close(buffer->tc_input);
 	}
-	free(ftrace_in->tc_buffers);
-	free(ftrace_in->clock_uid);
-	free(ftrace_in->trace_name);
-	free(ftrace_in->trace_hostname);
-	free(ftrace_in->trace_sysname);
-	free(ftrace_in->trace_kernel_release);
-	free(ftrace_in->trace_creation_datetime);
-	free(ftrace_in);
+	ftrace_in_free(ftrace_in);
 }
 
 /* State of a message iterator */
