@@ -518,18 +518,17 @@ setup_ports_for_trace_buffer(struct ftrace_in *ftrace_in,
 			continue;
 		tracecmd_free_record(rec);
 
-		if (buffer_name) {
-			sprintf(NAME_BUF, "out-%s%d", buffer_name, i);
-		} else {
-			sprintf(NAME_BUF, "out%d", i);
-		}
-
 		/* create stream */
 		sprintf(NAME_BUF, "channel%d_%d", buffer_index, pd->cpu_id);
 		pd->stream =
 			bt_stream_create(ftrace_in->stream_class, ftrace_in->trace);
 		bt_stream_set_name(pd->stream, NAME_BUF);
 
+		if (buffer_name) {
+			sprintf(NAME_BUF, "out-%s%d", buffer_name, i);
+		} else {
+			sprintf(NAME_BUF, "out%d", i);
+		}
 		bt_self_component_source_add_output_port(self_component_source,
 												 NAME_BUF, pd, NULL);
 	}
