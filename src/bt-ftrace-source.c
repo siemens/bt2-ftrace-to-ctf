@@ -246,9 +246,11 @@ static bt_event_class *create_event_class(bt_stream_class *stream_class,
 
 	/* Name the event class */
 	if (ftrace_in->lttng_format) {
-		strcpy(NAME_BUF, lttng_get_event_name_from_event(event));
+		snprintf(NAME_BUF, sizeof(NAME_BUF), "%s",
+				 lttng_get_event_name_from_event(event));
 	} else {
-		sprintf(NAME_BUF, "%s:%s", event->system, event->name);
+		snprintf(NAME_BUF, sizeof(NAME_BUF), "%s:%s", event->system,
+				 event->name);
 	}
 	bt_event_class_set_name(event_class, NAME_BUF);
 	BT_FTRACE_LOG_INFO(loglvl, "create event %s", NAME_BUF);
@@ -436,7 +438,7 @@ static void create_metadata_and_trace(bt_self_component *self_component,
 
 	/* Create a default trace from (instance of `trace_class`) */
 	bt_trace *trace = bt_trace_create(trace_class);
-	sprintf(NAME_BUF, "%llu", tracecmd_get_traceid(tc_main));
+	snprintf(NAME_BUF, sizeof(NAME_BUF), "%llu", tracecmd_get_traceid(tc_main));
 #if HAS_BT2_TRACE_UID
 	if (mip_version >= 2) {
 		bt_trace_set_uid(trace, NAME_BUF);
@@ -519,15 +521,16 @@ setup_ports_for_trace_buffer(struct ftrace_in *ftrace_in,
 		tracecmd_free_record(rec);
 
 		/* create stream */
-		sprintf(NAME_BUF, "channel%d_%d", buffer_index, pd->cpu_id);
+		snprintf(NAME_BUF, sizeof(NAME_BUF), "channel%d_%d", buffer_index,
+				 pd->cpu_id);
 		pd->stream =
 			bt_stream_create(ftrace_in->stream_class, ftrace_in->trace);
 		bt_stream_set_name(pd->stream, NAME_BUF);
 
 		if (buffer_name) {
-			sprintf(NAME_BUF, "out-%s%d", buffer_name, i);
+			snprintf(NAME_BUF, sizeof(NAME_BUF), "out-%s%d", buffer_name, i);
 		} else {
-			sprintf(NAME_BUF, "out%d", i);
+			snprintf(NAME_BUF, sizeof(NAME_BUF), "out%d", i);
 		}
 		bt_self_component_source_add_output_port(self_component_source,
 												 NAME_BUF, pd, NULL);

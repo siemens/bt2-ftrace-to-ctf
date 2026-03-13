@@ -77,9 +77,9 @@ static void append_stream_infos(struct tracecmd_input *tc_input,
 		tracecmd_free_record(rec);
 
 		if (buffer_name) {
-			sprintf(NAME_BUF, "out-%s%d", buffer_name, i);
+			snprintf(NAME_BUF, sizeof(NAME_BUF), "out-%s%d", buffer_name, i);
 		} else {
-			sprintf(NAME_BUF, "out%d", i);
+			snprintf(NAME_BUF, sizeof(NAME_BUF), "out%d", i);
 		}
 		bt_value_array_append_empty_map_element(infos, &streaminfo);
 		bt_value_map_insert_string_entry(streaminfo, "port-name", NAME_BUF);

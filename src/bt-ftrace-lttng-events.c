@@ -20,7 +20,7 @@ static const char *lttng_field_name_replace_pid_by_tid(const char *field_name)
 	if (!field_name)
 		return NULL;
 
-	strcpy(outbuf, field_name);
+	snprintf(outbuf, sizeof(outbuf), "%s", field_name);
 	for (char *p = outbuf; *p != '\0'; ++p) {
 		if (p[0] == from[0] && p[1] == from[1] && p[2] == from[2]) {
 			/* We have found "pid".  Replace it in‑place. */
