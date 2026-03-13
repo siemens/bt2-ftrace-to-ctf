@@ -324,7 +324,10 @@ static int get_metadata_from_lttng_trace(const bt_plugin *ftrace_plugin,
 															"tracemeta");
 
 	/* prepare in-memory file for output */
-	pipe(out_fds);
+	if (pipe(out_fds) != 0) {
+		perror("pipe");
+		return -1;
+	}
 
 	/* Construct graph */
 	bt_graph *graph = bt_graph_create(opts->mip);
