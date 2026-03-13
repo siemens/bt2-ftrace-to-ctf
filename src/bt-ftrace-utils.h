@@ -27,7 +27,7 @@ static inline int event_has_prefix(const char *prefix,
 static inline int event_system_is(const char *name,
 								  const struct tep_event *event)
 {
-	if (strncmp(name, event->system, strlen(name)) == 0) {
+	if (strcmp(name, event->system) == 0) {
 		return true;
 	}
 	return false;
