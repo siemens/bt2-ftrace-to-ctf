@@ -393,6 +393,10 @@ static int get_metadata_from_lttng_trace(const bt_plugin *ftrace_plugin,
 	char *line = NULL;
 	size_t len = 0;
 	ssize_t nb = getline(&line, &len, fp);
+	if (nb <= 0) {
+		fclose(fp);
+		return -1;
+	}
 	line[nb] = '\0';
 	status = parse_trace_meta(line, &trace_meta);
 	if (status == 0) {
