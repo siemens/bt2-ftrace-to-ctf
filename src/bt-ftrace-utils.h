@@ -6,6 +6,7 @@
 #ifndef _BT_FTRACE_UTILS_H
 #define _BT_FTRACE_UTILS_H
 
+#include <stdbool.h>
 #include <event-parse.h>
 
 /**
