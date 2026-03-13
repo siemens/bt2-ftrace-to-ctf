@@ -251,7 +251,7 @@ static int parse_trace_meta(const char *buffer, trace_metadata *trace_meta)
 	if (!json_object_has_member(clock_o, "offset_s") ||
 		!json_object_has_member(clock_o, "offset_c") ||
 		!json_object_has_member(clock_o, "frequency") ||
-		!(json_object_has_member(clock_o, "uid") |
+		!(json_object_has_member(clock_o, "uid") ||
 		  json_object_has_member(clock_o, "uuid"))) {
 		g_printerr("\"clock\" object is missing one of the required fields.\n");
 		g_object_unref(parser);
