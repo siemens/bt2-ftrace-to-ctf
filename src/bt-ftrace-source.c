@@ -92,6 +92,8 @@ struct ftrace_in {
 	bt_bool lttng_format;
 	/* symbolize function addresses of well-known fields */
 	bt_bool symbolize_funcs;
+	/* include callstacks in the output */
+	bt_bool with_callstacks;
 
 	/* tracer and trace metadata */
 	char *trace_name;
@@ -113,6 +115,9 @@ struct ftrace_in {
 	bt_stream_class *stream_class;
 
 	bt_trace *trace;
+
+	/* mip version of the processing graph */
+	uint64_t mip_version;
 };
 
 /*
@@ -183,6 +188,34 @@ create_event_field_class(bt_trace_class *trace_class,
 	return field_class;
 }
 
+/**
+ * Create a dynamic array to store callstack addresses.
+ */
+static bt_field_class *create_callstack_field_class(bt_trace_class *trace_class,
+													int mip_version)
+{
+	bt_field_class *field_class;
+	bt_field_class *elem_class =
+		bt_field_class_integer_unsigned_create(trace_class);
+	bt_field_class_integer_set_field_value_range(elem_class, 64);
+	bt_field_class_integer_set_preferred_display_base(
+		elem_class, BT_FIELD_CLASS_INTEGER_PREFERRED_DISPLAY_BASE_HEXADECIMAL);
+	if (mip_version == 0) {
+		field_class =
+			bt_field_class_array_dynamic_create(trace_class, elem_class, NULL);
+	} else {
+#if HAS_BT2_NEW_DYNAMIC_FIELD_API
+		field_class =
+			bt_field_class_array_dynamic_without_length_field_location_create(
+				trace_class, elem_class);
+#else
+		/* MIP 1 is only support if new API is available */
+#endif
+	}
+	bt_field_class_put_ref(elem_class);
+	return field_class;
+}
+
 /*
  * Append common context fields to the context field class.
  * The following fields are added (and must be set when adding a event instance)
@@ -220,6 +253,22 @@ static void append_common_context_fields(bt_trace_class *trace_class,
 	bt_field_class_structure_append_member(context_field_class, "latency",
 										   field_class);
 	bt_field_class_put_ref(field_class);
+
+	if (ftrace_in->with_callstacks) {
+		/* kernel stack */
+		field_class =
+			create_callstack_field_class(trace_class, ftrace_in->mip_version);
+		bt_field_class_structure_append_member(context_field_class,
+											   "kernel_stack", field_class);
+		bt_field_class_put_ref(field_class);
+
+		/* user stack */
+		field_class =
+			create_callstack_field_class(trace_class, ftrace_in->mip_version);
+		bt_field_class_structure_append_member(context_field_class,
+											   "user_stack", field_class);
+		bt_field_class_put_ref(field_class);
+	}
 }
 
 /*
@@ -341,6 +390,7 @@ static void create_metadata_and_trace(bt_self_component *self_component,
 	char NAME_BUF[32];
 	const uint64_t mip_version =
 		bt_self_component_get_graph_mip_version(self_component);
+	ftrace_in->mip_version = mip_version;
 	bt_bool clock_is_monotonic = true;
 
 	/* Create a default trace class */
@@ -627,6 +677,11 @@ ftrace_in_initialize(bt_self_component_source *self_component_source,
 		ftrace_in->trace_creation_datetime =
 			strdup(bt_value_string_get(trace_date_val));
 	}
+	const bt_value *callstack_val =
+		bt_value_map_borrow_entry_value_const(params, "callstack");
+	if (callstack_val) {
+		ftrace_in->with_callstacks = bt_value_bool_get(callstack_val);
+	}
 
 	struct tracecmd_input *tc_main =
 		tracecmd_open(path, TRACECMD_FL_LOAD_NO_PLUGINS);
@@ -728,6 +783,14 @@ struct ftrace_in_message_iterator {
 	struct tep_record *rec;
 	unsigned long long last_rec_ts;
 
+	/* saved stack */
+	struct pending_stack {
+		uint64_t *kernel_stack;
+		int klen;
+		uint64_t *user_stack;
+		int ulen;
+	} pending_stack;
+
 	/* trace sequence buffer */
 	struct trace_seq seq;
 
@@ -778,6 +841,19 @@ ftrace_in_message_iterator_initialize(
 }
 
 /*
+ * Free and reset the pending stack buffers.
+ */
+static void clear_pending_stack(struct pending_stack *ps)
+{
+	free(ps->kernel_stack);
+	ps->kernel_stack = NULL;
+	ps->klen = 0;
+	free(ps->user_stack);
+	ps->user_stack = NULL;
+	ps->ulen = 0;
+}
+
+/*
  * Finalizes the message iterator.
  */
 void ftrace_in_message_iterator_finalize(
@@ -787,6 +863,7 @@ void ftrace_in_message_iterator_finalize(
 	struct ftrace_in_message_iterator *ftrace_in_iter =
 		bt_self_message_iterator_get_data(self_message_iterator);
 
+	clear_pending_stack(&ftrace_in_iter->pending_stack);
 	tracecmd_free_record(ftrace_in_iter->rec);
 	trace_seq_destroy(&ftrace_in_iter->seq);
 
@@ -872,6 +949,35 @@ set_message_common_fields(struct ftrace_in_message_iterator *ftrace_in_iter,
 	tep_print_event(trace_event->tep, seq, rec, "%s", TEP_PRINT_LATENCY);
 	trace_seq_terminate(seq);
 	bt_field_string_set_value(data_field, seq->buffer);
+
+	if (ftrace_in_iter->ftrace_in->with_callstacks) {
+		/* kernel stack */
+		bt_field *karr_field = bt_field_structure_borrow_member_field_by_name(
+			context_field, "kernel_stack");
+		const int klen = ftrace_in_iter->pending_stack.klen;
+		const uint64_t *kstack = ftrace_in_iter->pending_stack.kernel_stack;
+		bt_field_array_dynamic_set_length(karr_field, klen);
+		for (int i = 0; i < klen; i++) {
+			bt_field *elem =
+				bt_field_array_borrow_element_field_by_index(karr_field, i);
+			bt_field_integer_unsigned_set_value(elem, kstack[i]);
+		}
+
+		/* user stack */
+		bt_field *uarr_field = bt_field_structure_borrow_member_field_by_name(
+			context_field, "user_stack");
+		const int ulen = ftrace_in_iter->pending_stack.ulen;
+		const uint64_t *ustack = ftrace_in_iter->pending_stack.user_stack;
+		bt_field_array_dynamic_set_length(uarr_field, ulen);
+		for (int i = 0; i < ulen; i++) {
+			bt_field *elem =
+				bt_field_array_borrow_element_field_by_index(uarr_field, i);
+			bt_field_integer_unsigned_set_value(elem, ustack[i]);
+		}
+	}
+
+	/* clear pending stack for next event */
+	clear_pending_stack(&ftrace_in_iter->pending_stack);
 }
 
 static void set_message_field(struct ftrace_in_message_iterator *ftrace_in_iter,
@@ -936,6 +1042,26 @@ static void set_message_field(struct ftrace_in_message_iterator *ftrace_in_iter,
 	}
 }
 
+static void read_stack_field(struct tep_handle *tep,
+							 struct tep_event *trace_event,
+							 struct tep_record *rec, uint64_t **out_stack,
+							 int *out_len)
+{
+	int len = 0;
+	uint8_t *raw =
+		(uint8_t *)tep_get_field_raw(NULL, trace_event, "caller", rec, &len, 0);
+	int count = len / sizeof(uint64_t);
+	free(*out_stack);
+	*out_stack = malloc(count * sizeof(uint64_t));
+	for (int i = 0; i < count; i++)
+		(*out_stack)[i] =
+			tep_read_number(tep, raw + i * sizeof(uint64_t), sizeof(uint64_t));
+	/* strip trailing zero entries */
+	while (count > 0 && (*out_stack)[count - 1] == 0)
+		count--;
+	*out_len = count;
+}
+
 /*
  * Process a single event, load the next trace record and update the internal
  * state machine.
@@ -944,7 +1070,7 @@ static bt_message *
 create_message_from_event(struct ftrace_in_message_iterator *ftrace_in_iter,
 						  bt_self_message_iterator *self_message_iterator)
 {
-	bt_message *message;
+	bt_message *message = NULL;
 	bt_stream *stream = ftrace_in_iter->port_data->stream;
 	struct tep_record *rec = ftrace_in_iter->rec;
 	struct tep_event *trace_event;
@@ -1024,6 +1150,20 @@ create_message_from_event(struct ftrace_in_message_iterator *ftrace_in_iter,
 		goto done;
 	}
 
+	if (strcmp(trace_event->name, "kernel_stack") == 0) {
+		read_stack_field(tep, trace_event, rec,
+						 &ftrace_in_iter->pending_stack.kernel_stack,
+						 &ftrace_in_iter->pending_stack.klen);
+		goto next_record;
+	}
+
+	if (strcmp(trace_event->name, "user_stack") == 0) {
+		read_stack_field(tep, trace_event, rec,
+						 &ftrace_in_iter->pending_stack.user_stack,
+						 &ftrace_in_iter->pending_stack.ulen);
+		goto next_record;
+	}
+
 	struct bt_event_class *event_class =
 		g_hash_table_lookup(ftrace_in_iter->ftrace_in->event_classes,
 							(gconstpointer)((uintptr_t)trace_event->id));
@@ -1054,6 +1194,7 @@ create_message_from_event(struct ftrace_in_message_iterator *ftrace_in_iter,
 
 	ftrace_in_iter->events_in_pkg++;
 
+next_record:
 	/*
 	 * Memorize the last rec timestamp so we can use it in the end package message
 	 * and in discarded event messages.
@@ -1096,7 +1237,8 @@ ftrace_in_message_iterator_next(bt_self_message_iterator *self_message_iterator,
 			create_message_from_event(ftrace_in_iter, self_message_iterator);
 		if (message) {
 			messages[i++] = message;
-		} else {
+		} else if (ftrace_in_iter->state ==
+				   FTRACE_IN_MESSAGE_ITERATOR_STATE_ENDED) {
 			status = BT_MESSAGE_ITERATOR_CLASS_NEXT_METHOD_STATUS_END;
 			break;
 		}
@@ -1119,6 +1261,7 @@ ftrace_in_message_iterator_seek_beginning(
 		bt_self_message_iterator_get_data(self_message_iterator);
 
 	/* cleanup current state */
+	clear_pending_stack(&ftrace_in_iter->pending_stack);
 	tracecmd_free_record(ftrace_in_iter->rec);
 	BT_PACKET_PUT_REF_AND_RESET(ftrace_in_iter->packet);
 
@@ -1159,6 +1302,7 @@ ftrace_in_message_iterator_seek_ns_from_origin(
 	if (ftrace_in_iter->last_rec_ts < ns_from_orig_pos) {
 		while (ftrace_in_iter->rec &&
 			   ftrace_in_iter->last_rec_ts < ns_from_orig_pos) {
+			clear_pending_stack(&ftrace_in_iter->pending_stack);
 			tracecmd_free_record(ftrace_in_iter->rec);
 
 			ftrace_in_iter->rec =

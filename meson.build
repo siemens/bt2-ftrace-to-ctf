@@ -33,6 +33,10 @@ bt2_has_clock_unknown = cc.has_function('bt_clock_class_set_origin_unknown',
 bt2_has_trace_uid = cc.has_function('bt_trace_set_uid',
                                     dependencies: babeltrace2_dep,
                                     required: false)
+bt2_has_new_dynamic_field_api = cc.has_function(
+  'bt_field_class_array_dynamic_without_length_field_location_create',
+  dependencies: babeltrace2_dep,
+  required: false)
 
 project_version_parts = meson.project_version().split('.')
 conf_data = configuration_data({
@@ -43,6 +47,7 @@ conf_data = configuration_data({
   'has_bt2_clock_uid': bt2_has_clock_uid.to_int(),
   'has_bt2_clock_unknown': bt2_has_clock_unknown.to_int(),
   'has_bt2_trace_uid': bt2_has_trace_uid.to_int(),
+  'has_bt2_new_dynamic_field_api': bt2_has_new_dynamic_field_api.to_int(),
   'has_tracecmd_reverse_iteration': tc_has_reverse_it.to_int()
 })
 configure_file(input : 'src/config.h.in',

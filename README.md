@@ -29,6 +29,7 @@ The plugin uses the following initialization parameters:
 - "clock-uid": string, optional: UID or UUID of the trace clock
 - "trace-name": string, optional: trace name and `env.trace_name` property
 - "trace-creation-datetime": string (ISO‑8601), optional: `env.trace_creation_datetime` property
+- "callstack": boolean, optional: add callstack information to event context (if available)
 
 The plugin further implements the following query interfaces:
 
