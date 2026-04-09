@@ -115,27 +115,32 @@ int parse_args(int argc, char *argv[], prog_opts *opts)
 							  &opt_index)) != -1) {
 		switch (opt) {
 		case 'b':
+			free(opts->begin);
 			opts->begin = strdup(optarg);
 			break;
 		case 'c':
 			opts->ctf_version = optarg;
 			break;
 		case 'd':
+			free(opts->trace_datetime);
 			opts->trace_datetime = strdup(optarg);
 			break;
 		case 'e':
+			free(opts->end);
 			opts->end = strdup(optarg);
 			break;
 		case 'l':
 			opts->lttng = true;
 			break;
 		case 'n':
+			free(opts->trace_name);
 			opts->trace_name = strdup(optarg);
 			break;
 		case 'o':
 			opts->clock_offset = strtoull(optarg, NULL, 10);
 			break;
 		case 'u':
+			free(opts->clock_uid);
 			opts->clock_uid = strdup(optarg);
 			break;
 		case 's':
