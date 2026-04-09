@@ -341,8 +341,6 @@ static void create_metadata_and_trace(bt_self_component *self_component,
 	char NAME_BUF[32];
 	const uint64_t mip_version =
 		bt_self_component_get_graph_mip_version(self_component);
-	/* assume monotonic clock if not provided otherwise */
-	const char *traceclock = "mono";
 	bt_bool clock_is_monotonic = true;
 
 	/* Create a default trace class */
@@ -355,7 +353,10 @@ static void create_metadata_and_trace(bt_self_component *self_component,
 	struct tracecmd_input *tc_main = ftrace_in->tc_buffers[0].tc_input;
 
 #if WITH_TRACE_CMD_PRIVATE_SYMBOLS
-	traceclock = tracecmd_get_trace_clock(tc_main);
+	const char *traceclock = tracecmd_get_trace_clock(tc_main);
+#else
+	/* assume monotonic clock if not provided otherwise */
+	const char *traceclock = "mono";
 #endif
 	/* Create a default clock class (1 GHz frequency) */
 	bt_clock_class *clock_class = bt_clock_class_create(self_component);
