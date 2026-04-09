@@ -70,12 +70,19 @@ jobs:
           else
             apt-get install -y meson
           fi
+          # Install clang-tidy for static analysis on supported distros
+          if [[ "${{ matrix.distro }}" == "debian:trixie" || "${{ matrix.distro }}" == "debian:forky" ]]; then
+            apt-get install -y --no-install-recommends clang-tidy
+          fi
         shell: bash
 
       - name: build components
         run: |
           meson setup -Dbuildtype=debugoptimized ${{ matrix.meson_opts }} build
           cd build && ninja
+      - name: static analysis
+        if: matrix.distro == 'debian:trixie' || matrix.distro == 'debian:forky'
+        run: ninja -C build clang-tidy
 
       - name: download sample trace data
         uses: actions/download-artifact@v5
