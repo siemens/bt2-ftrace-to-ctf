@@ -402,6 +402,7 @@ static int get_metadata_from_lttng_trace(const bt_plugin *ftrace_plugin,
 	size_t len = 0;
 	ssize_t nb = getline(&line, &len, fp);
 	if (nb <= 0) {
+		free(line);
 		fclose(fp);
 		return -1;
 	}
