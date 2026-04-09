@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: (C) 2026 Siemens AG
+# SPDX-License-Identifier: MIT
+---
+Checks:          'clang-diagnostic-*,clang-analyzer-*,-clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling'
+WarningsAsErrors: ''
+HeaderFileExtensions:
+  - h
+ImplementationFileExtensions:
+  - c
+FormatStyle:     none
+CheckOptions:    {}
+SystemHeaders:   false
+...
