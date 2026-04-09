@@ -84,11 +84,25 @@ static bool check_ctf_version(const char *ctf_version, int *mip_version)
 	return false;
 }
 
+static void clear_opts(prog_opts *opts)
+{
+	free(opts->begin);
+	free(opts->ctf_version);
+	free(opts->clock_uid);
+	free(opts->end);
+	free(opts->trace_datetime);
+	free(opts->trace_name);
+	free(opts->trace_path);
+	free(opts->lttng_path);
+	free(opts->out_dir);
+	memset(opts, 0, sizeof(*opts));
+}
+
 int parse_args(int argc, char *argv[], prog_opts *opts)
 {
 	/* Initialise defaults */
 	memset(opts, 0, sizeof(*opts));
-	opts->ctf_version = "1.8";
+	opts->ctf_version = strdup("1.8");
 	opts->loglevel = BT_LOGGING_LEVEL_WARNING;
 
 	// clang-format off
@@ -119,7 +133,8 @@ int parse_args(int argc, char *argv[], prog_opts *opts)
 			opts->begin = strdup(optarg);
 			break;
 		case 'c':
-			opts->ctf_version = optarg;
+			free(opts->ctf_version);
+			opts->ctf_version = strdup(optarg);
 			break;
 		case 'd':
 			free(opts->trace_datetime);
@@ -170,12 +185,12 @@ int parse_args(int argc, char *argv[], prog_opts *opts)
 		return 1;
 	}
 
-	opts->trace_path = argv[optind];
+	opts->trace_path = strdup(argv[optind]);
 	if (positional_left == 3) {
-		opts->lttng_path = argv[optind + 1];
-		opts->out_dir = argv[optind + 2];
+		opts->lttng_path = strdup(argv[optind + 1]);
+		opts->out_dir = strdup(argv[optind + 2]);
 	} else {
-		opts->out_dir = argv[optind + 1];
+		opts->out_dir = strdup(argv[optind + 1]);
 	}
 
 	/* Sanity check inputs */
@@ -431,6 +446,7 @@ int main(int argc, char **argv)
 	prog_opts opts;
 
 	if (parse_args(argc, argv, &opts) != 0) {
+		clear_opts(&opts);
 		return -1;
 	}
 
@@ -447,16 +463,25 @@ int main(int argc, char **argv)
 	}
 
 	const bt_plugin *ftrace_plugin = load_plugin_by_name("ftrace");
-	if (!ftrace_plugin)
+	if (!ftrace_plugin) {
+		clear_opts(&opts);
 		return -1;
+	}
 
 	const bt_plugin *utils_plugin = load_plugin_by_name("utils");
-	if (!utils_plugin)
+	if (!utils_plugin) {
+		BT_PLUGIN_PUT_REF_AND_RESET(ftrace_plugin);
+		clear_opts(&opts);
 		return -1;
+	}
 
 	const bt_plugin *ctf_plugin = load_plugin_by_name("ctf");
-	if (!ctf_plugin)
+	if (!ctf_plugin) {
+		BT_PLUGIN_PUT_REF_AND_RESET(ftrace_plugin);
+		BT_PLUGIN_PUT_REF_AND_RESET(utils_plugin);
+		clear_opts(&opts);
 		return -1;
+	}
 
 	if (opts.lttng_path) {
 		get_metadata_from_lttng_trace(ftrace_plugin, ctf_plugin, utils_plugin,
@@ -518,8 +543,7 @@ int main(int argc, char **argv)
 		BT_PLUGIN_PUT_REF_AND_RESET(ftrace_plugin);
 		BT_PLUGIN_PUT_REF_AND_RESET(utils_plugin);
 		BT_PLUGIN_PUT_REF_AND_RESET(ctf_plugin);
-		free(opts.begin);
-		free(opts.end);
+		clear_opts(&opts);
 		return error_status;
 	}
 
@@ -548,9 +572,6 @@ int main(int argc, char **argv)
 	bt_graph_add_source_component(graph, source_cls, "ftrace", source_params,
 								  opts.loglevel, &source);
 	bt_value_put_ref(source_params);
-	free(opts.clock_uid);
-	free(opts.trace_datetime);
-	free(opts.trace_name);
 
 	/* optional lttng trace input */
 	if (opts.lttng_path) {
@@ -578,8 +599,6 @@ int main(int argc, char **argv)
 									  trimmer_params, opts.loglevel, &trimmer);
 		bt_value_put_ref(trimmer_params);
 	}
-	free(opts.begin);
-	free(opts.end);
 
 	/* sink component */
 	unsigned int p_major = 0;
@@ -682,6 +701,7 @@ int main(int argc, char **argv)
 	BT_PLUGIN_PUT_REF_AND_RESET(ftrace_plugin);
 	BT_PLUGIN_PUT_REF_AND_RESET(utils_plugin);
 	BT_PLUGIN_PUT_REF_AND_RESET(ctf_plugin);
+	clear_opts(&opts);
 
 	return 0;
 }
