@@ -189,17 +189,23 @@ create_event_field_class(bt_trace_class *trace_class,
 }
 
 /**
- * Create a dynamic array to store callstack addresses.
+ * Create a dynamic array to store callstack addresses or symbolized names.
  */
 static bt_field_class *create_callstack_field_class(bt_trace_class *trace_class,
-													int mip_version)
+													int mip_version,
+													bt_bool symbolize)
 {
 	bt_field_class *field_class;
-	bt_field_class *elem_class =
-		bt_field_class_integer_unsigned_create(trace_class);
-	bt_field_class_integer_set_field_value_range(elem_class, 64);
-	bt_field_class_integer_set_preferred_display_base(
-		elem_class, BT_FIELD_CLASS_INTEGER_PREFERRED_DISPLAY_BASE_HEXADECIMAL);
+	bt_field_class *elem_class;
+	if (symbolize) {
+		elem_class = bt_field_class_string_create(trace_class);
+	} else {
+		elem_class = bt_field_class_integer_unsigned_create(trace_class);
+		bt_field_class_integer_set_field_value_range(elem_class, 64);
+		bt_field_class_integer_set_preferred_display_base(
+			elem_class,
+			BT_FIELD_CLASS_INTEGER_PREFERRED_DISPLAY_BASE_HEXADECIMAL);
+	}
 	if (mip_version == 0) {
 		field_class =
 			bt_field_class_array_dynamic_create(trace_class, elem_class, NULL);
@@ -256,15 +262,15 @@ static void append_common_context_fields(bt_trace_class *trace_class,
 
 	if (ftrace_in->with_callstacks) {
 		/* kernel stack */
-		field_class =
-			create_callstack_field_class(trace_class, ftrace_in->mip_version);
+		field_class = create_callstack_field_class(
+			trace_class, ftrace_in->mip_version, ftrace_in->symbolize_funcs);
 		bt_field_class_structure_append_member(context_field_class,
 											   "kernel_stack", field_class);
 		bt_field_class_put_ref(field_class);
 
 		/* user stack */
-		field_class =
-			create_callstack_field_class(trace_class, ftrace_in->mip_version);
+		field_class = create_callstack_field_class(
+			trace_class, ftrace_in->mip_version, false);
 		bt_field_class_structure_append_member(context_field_class,
 											   "user_stack", field_class);
 		bt_field_class_put_ref(field_class);
@@ -951,6 +957,9 @@ set_message_common_fields(struct ftrace_in_message_iterator *ftrace_in_iter,
 	bt_field_string_set_value(data_field, seq->buffer);
 
 	if (ftrace_in_iter->ftrace_in->with_callstacks) {
+		const bt_bool symbolize = ftrace_in_iter->ftrace_in->symbolize_funcs;
+		struct tep_handle *tep = trace_event->tep;
+
 		/* kernel stack */
 		bt_field *karr_field = bt_field_structure_borrow_member_field_by_name(
 			context_field, "kernel_stack");
@@ -960,7 +969,12 @@ set_message_common_fields(struct ftrace_in_message_iterator *ftrace_in_iter,
 		for (int i = 0; i < klen; i++) {
 			bt_field *elem =
 				bt_field_array_borrow_element_field_by_index(karr_field, i);
-			bt_field_integer_unsigned_set_value(elem, kstack[i]);
+			if (symbolize) {
+				format_func_addr(tep, seq, kstack[i]);
+				bt_field_string_set_value(elem, seq->buffer);
+			} else {
+				bt_field_integer_unsigned_set_value(elem, kstack[i]);
+			}
 		}
 
 		/* user stack */
@@ -972,6 +986,7 @@ set_message_common_fields(struct ftrace_in_message_iterator *ftrace_in_iter,
 		for (int i = 0; i < ulen; i++) {
 			bt_field *elem =
 				bt_field_array_borrow_element_field_by_index(uarr_field, i);
+			/* take address as is, as we cannot symbolize (no userspace debug info) */
 			bt_field_integer_unsigned_set_value(elem, ustack[i]);
 		}
 	}

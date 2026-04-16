@@ -8,6 +8,7 @@
 
 #include <event-parse.h>
 #include <babeltrace2/babeltrace.h>
+#include <inttypes.h>
 
 #include "bt-ftrace-utils.h"
 
@@ -21,6 +22,27 @@ static inline int event_field_is_symbolic(struct tep_event *event,
 		event_has_prefix("funcgraph_", event) && (strcmp(name, "func") == 0))
 		return 1;
 	return 0;
+}
+
+/**
+ * Format a function address as "func_name+0xoffset" or "0x<addr>" if unknown.
+ */
+static inline void format_func_addr(struct tep_handle *tep,
+									struct trace_seq *seq, uint64_t addr)
+{
+	const char *func = tep_find_function(tep, addr);
+	trace_seq_reset(seq);
+	if (func) {
+		unsigned long long func_addr = tep_find_function_address(tep, addr);
+		unsigned long long offset = addr - func_addr;
+		if (offset)
+			trace_seq_printf(seq, "%s+0x%llx", func, offset);
+		else
+			trace_seq_printf(seq, "%s", func);
+	} else {
+		trace_seq_printf(seq, "0x%" PRIx64, addr);
+	}
+	trace_seq_terminate(seq);
 }
 
 /**
