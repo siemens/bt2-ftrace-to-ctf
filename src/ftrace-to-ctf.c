@@ -19,6 +19,7 @@
 /* Structure that holds the parsed options */
 typedef struct {
 	char *begin;
+	bool callstack;
 	bool lttng;
 	bool symbolize;
 	char *ctf_version;
@@ -47,10 +48,11 @@ static void print_usage(char *prog_name)
 {
 	fprintf(
 		stderr,
-		"Usage: %s [-bcdehlnosuv] <trace.dat> [<lttng-trace>] <outdir>\n"
+		"Usage: %s [-bCcdehlnosuv] <trace.dat> [<lttng-trace>] <outdir>\n"
 		"\n"
 		"Options:\n"
 		"  -b, --begin <ts>      skip until (babeltrace2-filter.utils.trimmer begin input)\n"
+		"  -C, --callstack       Include callstacks in the output\n"
 		"  -c, --ctf-version <v> CTF version to use (default: 1.8)\n"
 		"  -d, --trace-dt <name> ISO‑8601 timestamp of the trace\n"
 		"  -e, --end <ts>        trim after (babeltrace2-filter.utils.trimmer end input)\n"
@@ -108,6 +110,7 @@ int parse_args(int argc, char *argv[], prog_opts *opts)
 	// clang-format off
 	static const struct option long_opts[] = {
 		{ "begin",       required_argument, 0, 'b' },
+		{ "callstack",   no_argument,       0, 'C' },
 		{ "ctf-version", required_argument, 0 , 'c'},
 		{ "clock-offset", required_argument, 0, 'o'},
 		{ "clock-uid",   required_argument, 0, 'u' },
@@ -125,12 +128,15 @@ int parse_args(int argc, char *argv[], prog_opts *opts)
 	int opt;
 	int opt_index = 0;
 
-	while ((opt = getopt_long(argc, argv, "b:c:d:e:ln:o:u:svh", long_opts,
+	while ((opt = getopt_long(argc, argv, "b:Cc:d:e:ln:o:u:svh", long_opts,
 							  &opt_index)) != -1) {
 		switch (opt) {
 		case 'b':
 			free(opts->begin);
 			opts->begin = strdup(optarg);
+			break;
+		case 'C':
+			opts->callstack = true;
 			break;
 		case 'c':
 			free(opts->ctf_version);
@@ -201,6 +207,11 @@ int parse_args(int argc, char *argv[], prog_opts *opts)
 				opts->ctf_version);
 		print_usage(argv[0]);
 		return 1;
+	}
+	if (strcmp(opts->ctf_version, "1.8") == 0 && opts->callstack) {
+		fprintf(
+			stderr,
+			"Warning: callstack support is unreliable on CTF 1.8. Use CTF 2 instead.\n");
 	}
 	if (access(opts->trace_path, R_OK) != 0) {
 		perror("cannot read trace file");
@@ -553,6 +564,7 @@ int main(int argc, char **argv)
 	bt_value *source_params = bt_value_map_create();
 	bt_value_map_insert_empty_array_entry(source_params, "inputs", &inputs);
 	bt_value_array_append_string_element(inputs, opts.trace_path);
+	bt_value_map_insert_bool_entry(source_params, "callstack", opts.callstack);
 	bt_value_map_insert_bool_entry(source_params, "lttng", opts.lttng);
 	bt_value_map_insert_bool_entry(source_params, "symbolize", opts.symbolize);
 	bt_value_map_insert_unsigned_integer_entry(source_params, "clock-offset",
