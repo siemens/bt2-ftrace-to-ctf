@@ -87,6 +87,10 @@ const char *lttng_get_field_name_from_event(const struct tep_event *event,
 		return "tid";
 	if (strcmp(field_name, "task") == 0)
 		return "procname";
+	if (strcmp(field_name, "kernel_stack") == 0)
+		return "_callstack_kernel";
+	if (strcmp(field_name, "user_stack") == 0)
+		return "_callstack_user";
 	return lttng_field_name_replace_pid_by_tid(field_name);
 }
 

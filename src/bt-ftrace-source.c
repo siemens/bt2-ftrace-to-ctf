@@ -264,15 +264,23 @@ static void append_common_context_fields(bt_trace_class *trace_class,
 		/* kernel stack */
 		field_class = create_callstack_field_class(
 			trace_class, ftrace_in->mip_version, ftrace_in->symbolize_funcs);
+		field_name_out =
+			ftrace_in->lttng_format ?
+				lttng_get_field_name_from_event(event, "kernel_stack") :
+				"kernel_stack";
 		bt_field_class_structure_append_member(context_field_class,
-											   "kernel_stack", field_class);
+											   field_name_out, field_class);
 		bt_field_class_put_ref(field_class);
 
 		/* user stack */
 		field_class = create_callstack_field_class(
 			trace_class, ftrace_in->mip_version, false);
+		field_name_out =
+			ftrace_in->lttng_format ?
+				lttng_get_field_name_from_event(event, "user_stack") :
+				"user_stack";
 		bt_field_class_structure_append_member(context_field_class,
-											   "user_stack", field_class);
+											   field_name_out, field_class);
 		bt_field_class_put_ref(field_class);
 	}
 }
@@ -961,8 +969,11 @@ set_message_common_fields(struct ftrace_in_message_iterator *ftrace_in_iter,
 		struct tep_handle *tep = trace_event->tep;
 
 		/* kernel stack */
+		field_name = lttng ? lttng_get_field_name_from_event(trace_event,
+															 "kernel_stack") :
+							 "kernel_stack";
 		bt_field *karr_field = bt_field_structure_borrow_member_field_by_name(
-			context_field, "kernel_stack");
+			context_field, field_name);
 		const int klen = ftrace_in_iter->pending_stack.klen;
 		const uint64_t *kstack = ftrace_in_iter->pending_stack.kernel_stack;
 		bt_field_array_dynamic_set_length(karr_field, klen);
@@ -978,8 +989,11 @@ set_message_common_fields(struct ftrace_in_message_iterator *ftrace_in_iter,
 		}
 
 		/* user stack */
+		field_name =
+			lttng ? lttng_get_field_name_from_event(trace_event, "user_stack") :
+					"user_stack";
 		bt_field *uarr_field = bt_field_structure_borrow_member_field_by_name(
-			context_field, "user_stack");
+			context_field, field_name);
 		const int ulen = ftrace_in_iter->pending_stack.ulen;
 		const uint64_t *ustack = ftrace_in_iter->pending_stack.user_stack;
 		bt_field_array_dynamic_set_length(uarr_field, ulen);
