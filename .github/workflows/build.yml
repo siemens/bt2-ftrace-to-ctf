@@ -134,3 +134,147 @@ jobs:
             trace.dat
             trace.stack.dat
             trace.sub.dat
+    
+  unit-tests-and-coverage:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            ninja-build \
+            meson \
+            libbabeltrace2-dev \
+            libtraceevent-dev \
+            libtracecmd-dev \
+            libtracefs-dev \
+            libglib2.0-dev \
+            libjson-glib-dev \
+            babeltrace2 \
+            p7zip-full \
+            libcmocka-dev \
+            lcov
+      
+      - name: Configure meson (with coverage)
+        run: |
+          meson setup --wipe \
+            --buildtype=debug \
+            -Db_coverage=true \
+            build_coverage
+
+      - name: Build
+        run: ninja -C build_coverage
+
+      - name: Run unit tests
+        continue-on-error: true
+        run: meson test -C build_coverage --print-errorlogs --suite ftrace-to-ctf
+
+
+  run-sanitizers:
+    needs: unit-tests-and-coverage
+    runs-on: ubuntu-24.04
+    steps:
+      - name: checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            ninja-build \
+            meson \
+            libbabeltrace2-dev \
+            libtraceevent-dev \
+            libtracecmd-dev \
+            libtracefs-dev \
+            libglib2.0-dev \
+            libjson-glib-dev \
+            babeltrace2 \
+            p7zip-full 
+
+      - name: build with sanitizers
+        run: |
+          meson setup -Db_sanitize=address,undefined -Dbuildtype=debug build_asan
+          ninja -C build_asan
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: download sample trace data
+        uses: actions/download-artifact@v4
+        with:
+          name: trace-data
+
+      - name: execute dynamic smoke tests
+        env:
+          BABELTRACE_PLUGIN_PATH: ${{ github.workspace }}/build_asan
+          ASAN_OPTIONS: "detect_leaks=1:halt_on_error=1:print_stack_trace=1:malloc_context_size=30:leak_check_at_exit=1"
+          UBSAN_OPTIONS: "halt_on_error=0:print_stack_trace=1"
+          LD_PRELOAD: /usr/lib/x86_64-linux-gnu/libasan.so.8
+        run: |
+          mkdir -p /tmp/ctf_out
+          ./build_asan/ftrace-to-ctf --lttng trace.dat /tmp/ctf_out
+
+
+  induction-test:
+    needs: run-sanitizers
+    runs-on: ubuntu-24.04
+    steps: 
+      - name: checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            ninja-build \
+            meson \
+            libbabeltrace2-dev \
+            libtraceevent-dev \
+            libtracecmd-dev \
+            libtracefs-dev \
+            libglib2.0-dev \
+            libjson-glib-dev \
+            babeltrace2 \
+            p7zip-full 
+      
+      - name: build components
+        run: |
+          meson setup -Dbuildtype=debugoptimized build
+          cd build && ninja
+
+      - name: Extract test traces 
+        run: |
+          mkdir -p ./extracted_traces
+          tar -xzf ./tests/testtraces.tar.gz -C ./extracted_traces
+
+          echo "--- Extracted files ---"
+          find ./extracted_traces -type f
+
+      - name: Permissions for script
+        run: |
+          chmod +x ./scripts/induction_test.sh
+
+      - name: Run induction test (conversion + validation)
+        continue-on-error: true
+        run: |
+          ./scripts/induction_test.sh \
+            ./build/ftrace-to-ctf \
+            ./extracted_traces/trace.dat \
+            ./extracted_traces/testtrace/ust/uid/1000/64-bit \
+            ./converted_ctf_trace \
+            ./converted_ctf_ftrace

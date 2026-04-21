@@ -2,3 +2,4 @@
 # SPDX-FileCopyrightText: (C) 2025 Siemens
 /.vscode
 /build*
+/docs
