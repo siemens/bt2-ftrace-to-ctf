@@ -5,9 +5,9 @@
  * The tracemeta sink emits per-stream clock metadata in json-lines format that
  * can be used to sync the clocks of multiple traces. The format is as following:
  * {
- *   trace: { (uid: <str> | uuid: <str>)? },
- *   stream: { id: <int>, name: <str>},
- *   clock: { offset_s: <int>, offset_c: <int>, frequency: <int>, (uid: str | uuid: str)? },
+ *   trace: { (uid: str | uuid: str)? },
+ *   stream: { id: int, name: str},
+ *   clock: { offset_s: int, offset_c: int, frequency: int, (uid: str | uuid: str)? },
  *   env: { { name: value }, ... }
  * }
  * The sink component uses the following initialization parameters:
