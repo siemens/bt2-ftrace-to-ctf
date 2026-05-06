@@ -11,7 +11,7 @@ on:
   pull_request:
   workflow_dispatch:
 
-# Sets permissions of the GITHUB_TOKEN to checkout the repository
+    # Sets permissions of the GITHUB_TOKEN to checkout the repository
 permissions:
   contents: read
 
@@ -38,9 +38,8 @@ jobs:
     needs: generate-trace-data
     strategy:
       matrix:
-        distro:
-          ["debian:bookworm", "debian:trixie", "debian:forky", "ubuntu:noble"]
-        meson_opts: ["-Dtracecmd-internals=false", "-Dtracecmd-internals=true"]
+        distro: [ "debian:bookworm", "debian:trixie", "debian:forky", "ubuntu:noble" ]
+        meson_opts: [ "-Dtracecmd-internals=false", "-Dtracecmd-internals=true" ]
     container: ${{ matrix.distro }}
     steps:
       - name: checkout repository
@@ -85,7 +84,7 @@ jobs:
         run: ninja -C build clang-tidy
 
       - name: download sample trace data
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: trace-data
 
@@ -127,7 +126,7 @@ jobs:
           sudo trace-cmd record -C mono -T -e "sched:sched_switch" -o trace.stack.dat sleep 1
           sudo trace-cmd record -C mono -e sched -B block -e block -B time -e timer -o trace.sub.dat sleep 1
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: trace-data
           path: |
