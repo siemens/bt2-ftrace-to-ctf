@@ -660,6 +660,9 @@ static void ftrace_in_free(struct ftrace_in *ftrace_in)
 	free(ftrace_in->trace_sysname);
 	free(ftrace_in->trace_kernel_release);
 	free(ftrace_in->trace_creation_datetime);
+	if (ftrace_in->progress_fd >= 0)
+		close(ftrace_in->progress_fd);
+	free(ftrace_in->progress_path);
 	free(ftrace_in);
 }
 
@@ -735,6 +738,26 @@ ftrace_in_initialize(bt_self_component_source *self_component_source,
 		ftrace_in->with_callstacks = bt_value_bool_get(callstack_val);
 	}
 
+	ftrace_in->progress_fd = -1;
+	ftrace_in->progress_path = NULL;
+	ftrace_in->progress_begin_ts = 0;
+	ftrace_in->progress_end_ts = 0;
+	ftrace_in->progress_last_emitted = 0;
+	const bt_value *progress_fd_val =
+		bt_value_map_borrow_entry_value_const(params, "progress-fd");
+	if (progress_fd_val) {
+		ftrace_in->progress_fd =
+			(int)bt_value_integer_signed_get(progress_fd_val);
+	}
+	const bt_value *progress_path_val =
+		bt_value_map_borrow_entry_value_const(params, "progress-path");
+	if (progress_path_val) {
+		ftrace_in->progress_path =
+			strdup(bt_value_string_get(progress_path_val));
+		ftrace_in->progress_fd =
+			open(ftrace_in->progress_path, O_WRONLY | O_NONBLOCK);
+	}
+
 	struct tracecmd_input *tc_main =
 		tracecmd_open(path, TRACECMD_FL_LOAD_NO_PLUGINS);
 	if (!tc_main) {
@@ -770,6 +793,13 @@ ftrace_in_initialize(bt_self_component_source *self_component_source,
 	if (ret) {
 		/* TODO: cleanup */
 		return BT_COMPONENT_CLASS_INITIALIZE_METHOD_STATUS_ERROR;
+	}
+
+	if (ftrace_in->progress_fd >= 0) {
+		ftrace_in->progress_begin_ts =
+			tracecmd_get_first_ts(ftrace_in->tc_buffers[0].tc_input);
+		ftrace_in->progress_end_ts =
+			get_buffer_end_ts(ftrace_in->tc_buffers[0].tc_input);
 	}
 
 	return BT_COMPONENT_CLASS_INITIALIZE_METHOD_STATUS_OK;
@@ -1267,6 +1297,7 @@ next_record:
 	 * and in discarded event messages.
 	 */
 	ftrace_in_iter->last_rec_ts = rec->ts;
+	ftrace_in_iter->ftrace_in->progress_last_emitted = rec->ts;
 
 	/* read next record */
 	tracecmd_free_record(rec);
@@ -1309,6 +1340,7 @@ ftrace_in_message_iterator_next(bt_self_message_iterator *self_message_iterator,
 			status = BT_MESSAGE_ITERATOR_CLASS_NEXT_METHOD_STATUS_END;
 			break;
 		}
+		emit_progress(ftrace_in_iter->ftrace_in, "converting");
 	} while (i < capacity);
 
 	if (i > 0) {
@@ -1340,6 +1372,7 @@ ftrace_in_message_iterator_seek_beginning(
 	ftrace_in_iter->events_discarded = 0;
 	ftrace_in_iter->last_rec_ts = 0;
 	ftrace_in_iter->state = FTRACE_IN_MESSAGE_ITERATOR_STATE_STREAM_BEGINNING;
+	ftrace_in_iter->ftrace_in->progress_last_emitted = 0;
 
 	return BT_MESSAGE_ITERATOR_CLASS_SEEK_BEGINNING_METHOD_STATUS_OK;
 }
