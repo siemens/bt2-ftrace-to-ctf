@@ -15,6 +15,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <uuid.h>
+#include <poll.h>
 
 /* Structure that holds the parsed options */
 typedef struct {
@@ -35,6 +36,9 @@ typedef struct {
 	int loglevel;
 	int progress_fd;
 	char *progress_path;
+	/* Interactive progress bar: internal pipe fds */
+	int progress_pipe[2];
+	bool use_progress_bar;
 } prog_opts;
 
 typedef struct {
@@ -123,13 +127,13 @@ int parse_args(int argc, char *argv[], prog_opts *opts)
 		{ "symbolize",   no_argument,       0, 's' },
 		{ "end",         required_argument, 0, 'e' },
 		{ "lttng",       no_argument,       0, 'l' },
+		{ "progress-fd",   required_argument, 0, 'p' },
+		{ "progress-path", required_argument, 0, 'P' },
 		{ "trace-dt",    required_argument, 0, 'd' },
 		{ "trace-name",  required_argument, 0, 'n' },
 		{ "verbose",     no_argument,       0, 'v' },
-		{ "help",           no_argument,       0, 'h' },
-		{ "progress-fd",    required_argument, 0, 'p' },
-		{ "progress-path",  required_argument, 0, 'P' },
-		{ 0,                0,                 0,  0  }
+		{ "help",        no_argument,       0, 'h' },
+		{ 0,             0,                 0,  0  }
 	};
 	// clang-format on
 
@@ -461,6 +465,76 @@ static int get_metadata_from_lttng_trace(const bt_plugin *ftrace_plugin,
 	return status;
 }
 
+/*
+ * Parse a progress message from the pipe and return the percentage.
+ * Returns -1 if no valid progress message was found.
+ */
+static int parse_progress_msg(const char *buf)
+{
+	const char *pct_str = strstr(buf, "PROGRESS ");
+	if (!pct_str)
+		return -1;
+
+	pct_str += 9;
+	char *endptr;
+	int pct = strtol(pct_str, &endptr, 10);
+	if (pct_str == endptr)
+		return -1;
+
+	if (pct < 0)
+		pct = 0;
+	if (pct > 100)
+		pct = 100;
+
+	return pct;
+}
+
+/*
+ * Render an interactive progress bar on stderr.
+ * Uses \r to overwrite the current line.
+ */
+static void render_progress_bar(int pct)
+{
+	const int bar_width = 40;
+	int filled = (pct * bar_width) / 100;
+
+	fprintf(stderr, "\r[");
+	for (int i = 0; i < bar_width; i++) {
+		if (i < filled)
+			fputc('#', stderr);
+		else
+			fputc(' ', stderr);
+	}
+	fprintf(stderr, "] %3d%%", pct);
+	fflush(stderr);
+}
+
+/*
+ * Drain any pending progress messages from the pipe and update the bar.
+ * Uses poll() for non-blocking read.
+ */
+static void update_progress_bar(int pipe_fd)
+{
+	char buf[512];
+	ssize_t nr;
+	int pct = -1;
+
+	struct pollfd pfd = { .fd = pipe_fd, .events = POLLIN };
+	while (poll(&pfd, 1, 0) > 0 && (pfd.revents & POLLIN)) {
+		nr = read(pipe_fd, buf, sizeof(buf) - 1);
+		if (nr <= 0)
+			break;
+
+		buf[nr] = '\0';
+		int new_pct = parse_progress_msg(buf);
+		if (new_pct >= 0)
+			pct = new_pct;
+	}
+
+	if (pct >= 0)
+		render_progress_bar(pct);
+}
+
 int main(int argc, char **argv)
 {
 	const bt_component_source *source = NULL;
@@ -571,6 +645,17 @@ int main(int argc, char **argv)
 		BT_PLUGIN_PUT_REF_AND_RESET(ctf_plugin);
 		clear_opts(&opts);
 		return error_status;
+	}
+
+	/* Set up interactive progress bar when running from a tty */
+	opts.use_progress_bar = false;
+	opts.progress_pipe[0] = -1;
+	opts.progress_pipe[1] = -1;
+	if (isatty(STDERR_FILENO) && opts.progress_fd < 0 && !opts.progress_path) {
+		if (pipe(opts.progress_pipe) == 0) {
+			opts.progress_fd = opts.progress_pipe[1];
+			opts.use_progress_bar = true;
+		}
 	}
 
 	bt_graph *graph = bt_graph_create(opts.mip);
@@ -714,6 +799,9 @@ int main(int argc, char **argv)
 	bt_bool is_running = 1;
 	while (is_running) {
 		status = bt_graph_run_once(graph);
+		if (opts.use_progress_bar)
+			update_progress_bar(opts.progress_pipe[0]);
+
 		switch (status) {
 		case BT_GRAPH_RUN_ONCE_STATUS_OK:
 			break;
@@ -731,6 +819,11 @@ int main(int argc, char **argv)
 			printf("other error\n");
 			break;
 		}
+	}
+	if (opts.use_progress_bar) {
+		render_progress_bar(100);
+		fprintf(stderr, "\n");
+		close(opts.progress_pipe[0]);
 	}
 	if (status != BT_GRAPH_RUN_ONCE_STATUS_END) {
 		printf("graph execution failed\n");
