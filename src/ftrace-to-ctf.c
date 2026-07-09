@@ -515,7 +515,7 @@ int main(int argc, char **argv)
 		error_status = -1;
 	}
 
-	const bt_component_class_source *source_lttng_cls;
+	const bt_component_class_source *source_lttng_cls = NULL;
 	if (opts.lttng_path) {
 		source_lttng_cls =
 			bt_plugin_borrow_source_component_class_by_name_const(ctf_plugin,
