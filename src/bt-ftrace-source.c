@@ -195,7 +195,7 @@ static bt_field_class *create_callstack_field_class(bt_trace_class *trace_class,
 													int mip_version,
 													bt_bool symbolize)
 {
-	bt_field_class *field_class;
+	bt_field_class *field_class = NULL;
 	bt_field_class *elem_class;
 	if (symbolize) {
 		elem_class = bt_field_class_string_create(trace_class);
