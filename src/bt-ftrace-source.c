@@ -38,6 +38,7 @@
 #include "bt-ftrace-lttng-events.h"
 #include "bt-ftrace-logging.h"
 #include "bt-ftrace-source.h"
+#include "bt-ftrace-source-query.h"
 #include "bt-ftrace-sym-field.h"
 #include "bt-ftrace-utils.h"
 #if WITH_TRACE_CMD_PRIVATE_SYMBOLS
@@ -45,11 +46,12 @@
 #endif
 
 #include <babeltrace2/babeltrace.h>
-#include <event-parse.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <glib.h>
 #include <inttypes.h>
 #include <libgen.h>
-#include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <trace-cmd.h>
@@ -118,6 +120,13 @@ struct ftrace_in {
 
 	/* mip version of the processing graph */
 	uint64_t mip_version;
+
+	/* progress reporting */
+	int progress_fd;
+	char *progress_path;
+	uint64_t progress_begin_ts;
+	uint64_t progress_end_ts;
+	uint64_t progress_last_emitted;
 };
 
 /*
@@ -141,6 +150,35 @@ static void parse_tracedat_opts(struct ftrace_in *ftrace_in)
 #else
 	ftrace_in->trace_sysname = strdup("Linux");
 #endif
+}
+
+static void emit_progress(struct ftrace_in *ftrace_in, const char *status)
+{
+	if (ftrace_in->progress_fd < 0)
+		return;
+
+	if (ftrace_in->progress_end_ts <= ftrace_in->progress_begin_ts)
+		return;
+
+	int pct =
+		(int)((ftrace_in->progress_last_emitted -
+			   ftrace_in->progress_begin_ts) *
+			  100 /
+			  (ftrace_in->progress_end_ts - ftrace_in->progress_begin_ts));
+	if (pct > 100)
+		pct = 100;
+
+	char buf[256];
+	int n = snprintf(buf, sizeof(buf), "PROGRESS %d\nSTATUS %s\n", pct,
+					 status ? status : "");
+	if (n > 0) {
+		if (write(ftrace_in->progress_fd, buf, n) < 0 && errno != EAGAIN &&
+			errno != EINTR) {
+			BT_FTRACE_LOG_WARNING(ftrace_in->log_level,
+								  "failed to write progress: %s",
+								  strerror(errno));
+		}
+	}
 }
 
 static bt_field_class *
