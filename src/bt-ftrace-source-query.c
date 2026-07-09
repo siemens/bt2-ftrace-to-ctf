@@ -59,6 +59,49 @@ static int get_last_record_ts_clbk(struct tracecmd_input *tc_input,
 }
 #endif
 
+static uint64_t get_last_cpu_ts(struct tracecmd_input *tc_input, int cpu)
+{
+	uint64_t ts = 0;
+	struct tep_handle *tep = tracecmd_get_tep(tc_input);
+	const int ncpus = tep_get_cpus(tep);
+	cpu_set_t cpu_set;
+
+	CPU_ZERO(&cpu_set);
+	CPU_SET(cpu, &cpu_set);
+
+#if HAS_TRACECMD_REVERSE_ITERATION
+	/*
+	 * O(1) implementation, potentially with upstream memory leak as reported in
+	 * https://lore.kernel.org/linux-trace-devel/20251121134749.1530855-1-felix.moessbauer@siemens.com/
+	 */
+	tracecmd_iterate_events_reverse(tc_input, &cpu_set, ncpus,
+									get_last_record_ts_clbk, (void *)&ts, 0);
+#else
+	/* O(n) implementation iterating the whole trace file */
+	struct tep_record *rec = tracecmd_read_cpu_first(tc_input, cpu);
+	while (rec) {
+		ts = rec->ts;
+		tracecmd_free_record(rec);
+		rec = tracecmd_read_data(tc_input, cpu);
+	}
+#endif
+	return ts;
+}
+
+uint64_t get_buffer_end_ts(struct tracecmd_input *tc_input)
+{
+	uint64_t ts_max = 0;
+	struct tep_handle *tep = tracecmd_get_tep(tc_input);
+	const int ncpus = tep_get_cpus(tep);
+
+	for (int i = 0; i < ncpus; ++i) {
+		uint64_t ts = get_last_cpu_ts(tc_input, i);
+		if (ts > ts_max)
+			ts_max = ts;
+	}
+	return ts_max;
+}
+
 static void append_stream_infos(struct tracecmd_input *tc_input,
 								const char *buffer_name, bt_value *infos)
 {
@@ -86,28 +129,8 @@ static void append_stream_infos(struct tracecmd_input *tc_input,
 		bt_value_map_insert_empty_map_entry(streaminfo, "range-ns", &range);
 		bt_value_map_insert_signed_integer_entry(range, "begin-ns",
 												 (int64_t)ts_begin);
-		cpu_set_t cpu_set;
-		CPU_ZERO(&cpu_set);
-		CPU_SET(i, &cpu_set);
-		uint64_t ts_end = ts_begin;
-#if HAS_TRACECMD_REVERSE_ITERATION
-		/* 
-		 * O(1) implementation, potentially with upstream memory leak as reported in
-		 * https://lore.kernel.org/linux-trace-devel/20251121134749.1530855-1-felix.moessbauer@siemens.com/
-		 */
-		tracecmd_iterate_events_reverse(tc_input, &cpu_set, ncpus,
-										get_last_record_ts_clbk,
-										(void *)&ts_end, 0);
-#else
-		/* O(n) implementation iterating the whole trace file */
-		rec = tracecmd_read_cpu_first(tc_input, i);
-		while (rec) {
-			ts_end = rec->ts;
-			tracecmd_free_record(rec);
-			rec = tracecmd_read_data(tc_input, i);
-		}
-#endif
-		bt_value_map_insert_signed_integer_entry(range, "end-ns", ts_end);
+		bt_value_map_insert_signed_integer_entry(
+			range, "end-ns", (int64_t)get_last_cpu_ts(tc_input, i));
 	}
 }
 
