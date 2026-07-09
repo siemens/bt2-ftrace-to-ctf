@@ -32,6 +32,12 @@ Name of the trace (session).  Stored in the CTF metadata as \fBtrace_name\fR.
 \fB-o, --clock-offset \fIoffset\fR
 Trace clock offset in nanoseconds relative to the world clock.  If omitted, the program attempts to read the offset from a provided LTTng trace.
 .TP
+\fB-P, --progress-path \fIpath\fR
+Write psplash-style progress commands to a FIFO at \fIpath\fR.  Progress is reported based on the timestamp range of the trace data.
+.TP
+\fB-p, --progress-fd \fIfd\fR
+Write psplash-style progress commands to the given file descriptor \fIfd\fR.
+.TP
 \fB-u, --clock-uid \fI(uid|uuid)\fR
 Clock UID (or UUID, depending on the MIP version).  Stored in the CTF metadata as \fBclock-uid\fR.
 .TP

@@ -33,6 +33,8 @@ typedef struct {
 	char *lttng_path;
 	char *out_dir;
 	int loglevel;
+	int progress_fd;
+	char *progress_path;
 } prog_opts;
 
 typedef struct {
@@ -48,21 +50,23 @@ static void print_usage(char *prog_name)
 {
 	fprintf(
 		stderr,
-		"Usage: %s [-bCcdehlnosuv] <trace.dat> [<lttng-trace>] <outdir>\n"
+		"Usage: %s [-bCcdehlnopPsv] <trace.dat> [<lttng-trace>] <outdir>\n"
 		"\n"
 		"Options:\n"
-		"  -b, --begin <ts>      skip until (babeltrace2-filter.utils.trimmer begin input)\n"
-		"  -C, --callstack       Include callstacks in the output\n"
-		"  -c, --ctf-version <v> CTF version to use (default: 1.8)\n"
-		"  -d, --trace-dt <name> ISO‑8601 timestamp of the trace\n"
-		"  -e, --end <ts>        trim after (babeltrace2-filter.utils.trimmer end input)\n"
-		"  -l, --lttng           Convert well-known events to LTTng representation (default: off)\n"
+		"  -b, --begin <ts>        skip until (babeltrace2-filter.utils.trimmer begin input)\n"
+		"  -C, --callstack         Include callstacks in the output\n"
+		"  -c, --ctf-version <v>   CTF version to use (default: 1.8)\n"
+		"  -d, --trace-dt <name>   ISO-8601 timestamp of the trace\n"
+		"  -e, --end <ts>          trim after (babeltrace2-filter.utils.trimmer end input)\n"
+		"  -l, --lttng             Convert well-known events to LTTng representation (default: off)\n"
 		"  -n, --trace-name <name> Name of the trace (session)\n"
 		"  -o, --clock-offset <offset> Trace clock offset in ns to world clock\n"
-		"  -s, --symbolize       Symbolize function addresses\n"
+		"  -p, --progress-fd <fd>  Write progress to file descriptor\n"
+		"  -P, --progress-path <path> Write progress to fifo at path\n"
+		"  -s, --symbolize         Symbolize function addresses\n"
 		"  -u, --clock-uid <(u)uid> Trace clock uuid or uid, depending on MIP version\n"
-		"  -v, --verbose         Increase logging level (repeatable)\n"
-		"  -h, --help            Show this help message and exit\n",
+		"  -v, --verbose           Increase logging level (repeatable)\n"
+		"  -h, --help              Show this help message and exit\n",
 		basename(prog_name));
 }
 
@@ -95,6 +99,7 @@ static void clear_opts(prog_opts *opts)
 	free(opts->trace_datetime);
 	free(opts->trace_name);
 	free(opts->trace_path);
+	free(opts->progress_path);
 	free(opts->lttng_path);
 	free(opts->out_dir);
 	memset(opts, 0, sizeof(*opts));
@@ -106,6 +111,7 @@ int parse_args(int argc, char *argv[], prog_opts *opts)
 	memset(opts, 0, sizeof(*opts));
 	opts->ctf_version = strdup("1.8");
 	opts->loglevel = BT_LOGGING_LEVEL_WARNING;
+	opts->progress_fd = -1;
 
 	// clang-format off
 	static const struct option long_opts[] = {
@@ -120,15 +126,17 @@ int parse_args(int argc, char *argv[], prog_opts *opts)
 		{ "trace-dt",    required_argument, 0, 'd' },
 		{ "trace-name",  required_argument, 0, 'n' },
 		{ "verbose",     no_argument,       0, 'v' },
-		{ "help",        no_argument,       0, 'h' },
-		{ 0,             0,                 0,  0  }
+		{ "help",           no_argument,       0, 'h' },
+		{ "progress-fd",    required_argument, 0, 'p' },
+		{ "progress-path",  required_argument, 0, 'P' },
+		{ 0,                0,                 0,  0  }
 	};
 	// clang-format on
 
 	int opt;
 	int opt_index = 0;
 
-	while ((opt = getopt_long(argc, argv, "b:Cc:d:e:ln:o:u:svh", long_opts,
+	while ((opt = getopt_long(argc, argv, "b:Cc:d:e:ln:o:p:P:svh", long_opts,
 							  &opt_index)) != -1) {
 		switch (opt) {
 		case 'b':
@@ -166,6 +174,13 @@ int parse_args(int argc, char *argv[], prog_opts *opts)
 			break;
 		case 's':
 			opts->symbolize = true;
+			break;
+		case 'p':
+			opts->progress_fd = atoi(optarg);
+			break;
+		case 'P':
+			free(opts->progress_path);
+			opts->progress_path = strdup(optarg);
 			break;
 		case 'v':
 			opts->loglevel = opts->loglevel > 0 ? opts->loglevel - 1 : 0;
@@ -580,6 +595,14 @@ int main(int argc, char **argv)
 	if (opts.trace_datetime) {
 		bt_value_map_insert_string_entry(
 			source_params, "trace-creation-datetime", opts.trace_datetime);
+	}
+	if (opts.progress_fd >= 0) {
+		bt_value_map_insert_signed_integer_entry(source_params, "progress-fd",
+												 opts.progress_fd);
+	}
+	if (opts.progress_path) {
+		bt_value_map_insert_string_entry(source_params, "progress-path",
+										 opts.progress_path);
 	}
 	bt_graph_add_source_component(graph, source_cls, "ftrace", source_params,
 								  opts.loglevel, &source);
