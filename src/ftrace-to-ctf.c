@@ -16,6 +16,8 @@
 #include <stdlib.h>
 #include <uuid.h>
 
+#include "ftrace-to-ctf-discovery.h"
+
 /* Structure that holds the parsed options */
 typedef struct {
 	char *begin;
@@ -333,6 +335,7 @@ static int parse_trace_meta(const char *buffer, trace_metadata *trace_meta)
 static int get_metadata_from_lttng_trace(const bt_plugin *ftrace_plugin,
 										 const bt_plugin *ctf_plugin,
 										 const bt_plugin *utils_plugin,
+										 const char *lttng_trace_path,
 										 prog_opts *opts)
 {
 	const bt_component_source *source;
@@ -367,7 +370,7 @@ static int get_metadata_from_lttng_trace(const bt_plugin *ftrace_plugin,
 	bt_value *inputs;
 	bt_value *comp_params = bt_value_map_create();
 	bt_value_map_insert_empty_array_entry(comp_params, "inputs", &inputs);
-	bt_value_array_append_string_element(inputs, opts->lttng_path);
+	bt_value_array_append_string_element(inputs, lttng_trace_path);
 	bt_graph_add_source_component(graph, source_cls, "lttng", comp_params,
 								  opts->loglevel, &source);
 	bt_value_put_ref(comp_params);
@@ -449,7 +452,9 @@ static int get_metadata_from_lttng_trace(const bt_plugin *ftrace_plugin,
 int main(int argc, char **argv)
 {
 	const bt_component_source *source = NULL;
-	const bt_component_source *source_lttng = NULL;
+	const bt_component_source **lttng_sources = NULL;
+	size_t nb_lttng_sources = 0;
+	lttng_trace_list lttng_traces = { 0 };
 	const bt_component_filter *filter = NULL;
 	const bt_component_filter *trimmer = NULL;
 	const bt_component_sink *sink = NULL;
@@ -465,7 +470,7 @@ int main(int argc, char **argv)
 	printf("  lttng :       %s\n", opts.lttng ? "yes" : "no");
 	printf("  ctf-version : %s\n", opts.ctf_version);
 	printf("  trace   :     %s\n", opts.trace_path);
-	printf("  lttng-trace:  %s\n",
+	printf("  lttng-traces: %s\n",
 		   opts.lttng_path ? opts.lttng_path : "not provided");
 	printf("  outdir  :     %s\n", opts.out_dir);
 	if (opts.begin || opts.end) {
@@ -495,8 +500,30 @@ int main(int argc, char **argv)
 	}
 
 	if (opts.lttng_path) {
-		get_metadata_from_lttng_trace(ftrace_plugin, ctf_plugin, utils_plugin,
-									  &opts);
+		bool verbose = opts.loglevel <= BT_LOGGING_LEVEL_INFO;
+		const bt_component_class_source *ctf_fs_cls =
+			bt_plugin_borrow_source_component_class_by_name_const(ctf_plugin,
+																  "fs");
+		/*
+		 * Walk all transitive directories below opts.lttng_path once and ask
+		 * the ctf.fs source component class (via babeltrace.support-info) which
+		 * of them are CTF trace directories. This resembles the autodisc logic
+		 * from babeltrace2.
+		 */
+		if (ctf_fs_cls) {
+			discover_lttng_inputs(ctf_fs_cls, opts.lttng_path, &lttng_traces,
+								  opts.loglevel, verbose);
+		}
+		if (lttng_traces.count > 0) {
+			get_metadata_from_lttng_trace(ftrace_plugin, ctf_plugin,
+										  utils_plugin,
+										  lttng_traces.items[0].path, &opts);
+		} else {
+			fprintf(stderr,
+					"Warning: no CTF trace found under \"%s\"; "
+					"cannot extract clock metadata.\n",
+					opts.lttng_path);
+		}
 	}
 	printf("  clock-offset: %lu\n", opts.clock_offset);
 	printf("  clock-uid:    %s\n",
@@ -586,14 +613,51 @@ int main(int argc, char **argv)
 	bt_value_put_ref(source_params);
 
 	/* optional lttng trace input */
-	if (opts.lttng_path) {
-		source_params = bt_value_map_create();
-		bt_value_map_insert_empty_array_entry(source_params, "inputs", &inputs);
-		bt_value_array_append_string_element(inputs, opts.lttng_path);
-		bt_graph_add_source_component(graph, source_lttng_cls, "lttng",
-									  source_params, opts.loglevel,
-									  &source_lttng);
-		bt_value_put_ref(source_params);
+	if (lttng_traces.count > 0) {
+		/*
+		 * Directories that report the same support-info group form a single
+		 * logical trace and must be given to one source component; directories
+		 * with different identities need separate components, otherwise ctf.fs
+		 * rejects them ("identities don't match").
+		 */
+		lttng_sources = calloc(lttng_traces.count, sizeof(*lttng_sources));
+		bool *consumed = calloc(lttng_traces.count, sizeof(*consumed));
+		for (size_t i = 0; i < lttng_traces.count; ++i) {
+			if (consumed[i])
+				continue;
+			consumed[i] = true;
+
+			source_params = bt_value_map_create();
+			bt_value_map_insert_empty_array_entry(source_params, "inputs",
+												  &inputs);
+			bt_value_array_append_string_element(inputs,
+												 lttng_traces.items[i].path);
+
+			/* gather all further directories with the same group */
+			if (lttng_traces.items[i].group) {
+				for (size_t j = i + 1; j < lttng_traces.count; ++j) {
+					if (!consumed[j] && lttng_traces.items[j].group &&
+						strcmp(lttng_traces.items[i].group,
+							   lttng_traces.items[j].group) == 0) {
+						bt_value_array_append_string_element(
+							inputs, lttng_traces.items[j].path);
+						consumed[j] = true;
+					}
+				}
+			}
+
+			char comp_name[32];
+			snprintf(comp_name, sizeof(comp_name), "lttng%zu",
+					 nb_lttng_sources);
+			const bt_component_source *src = NULL;
+			bt_graph_add_source_component(graph, source_lttng_cls, comp_name,
+										  source_params, opts.loglevel, &src);
+			bt_value_put_ref(source_params);
+			if (src)
+				lttng_sources[nb_lttng_sources++] = src;
+		}
+		free(consumed);
+		lttng_trace_list_clear(&lttng_traces);
 	}
 
 	bt_graph_add_filter_component(graph, filter_cls, "muxer", NULL,
@@ -649,27 +713,30 @@ int main(int argc, char **argv)
 
 	const uint64_t nb_ft_ports =
 		bt_component_source_get_output_port_count(source);
+	uint64_t muxer_in_idx = 0;
 	for (uint64_t i = 0; i < nb_ft_ports; ++i) {
 		const bt_port_output *ft_out =
 			bt_component_source_borrow_output_port_by_index_const(source, i);
 		const bt_port_input *f_in =
-			bt_component_filter_borrow_input_port_by_index_const(filter, i);
+			bt_component_filter_borrow_input_port_by_index_const(
+				filter, muxer_in_idx++);
 		bt_graph_connect_ports(graph, ft_out, f_in, NULL);
 	}
-	/* plumbing of optional lttng source */
-	if (opts.lttng_path) {
+	/* plumbing of optional lttng sources */
+	for (size_t s = 0; s < nb_lttng_sources; ++s) {
 		const uint64_t nb_lttng_ports =
-			bt_component_source_get_output_port_count(source_lttng);
+			bt_component_source_get_output_port_count(lttng_sources[s]);
 		for (uint64_t i = 0; i < nb_lttng_ports; ++i) {
 			const bt_port_output *lttng_out =
 				bt_component_source_borrow_output_port_by_index_const(
-					source_lttng, i);
+					lttng_sources[s], i);
 			const bt_port_input *f_in =
 				bt_component_filter_borrow_input_port_by_index_const(
-					filter, i + nb_ft_ports);
+					filter, muxer_in_idx++);
 			bt_graph_connect_ports(graph, lttng_out, f_in, NULL);
 		}
 	}
+	free(lttng_sources);
 
 	const bt_port_output *f_out =
 		bt_component_filter_borrow_output_port_by_index_const(filter, 0);
