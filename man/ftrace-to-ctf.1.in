@@ -9,6 +9,23 @@ ftrace-to-ctf \- Convert ftrace trace data (trace.dat) to CTF format
 \fBftrace-to-ctf\fR constructs and executes a Babeltrace2 graph that reads ftrace data (produced by \fBtrace-cmd\fR in a \fItrace.dat\fR file) and writes it to a CTF (Common Trace Format) directory.  The program can optionally merge a LTTng trace, trim the trace by timestamps, and set various metadata such as clock offset, clock UID, trace name and creation datetime.
 .PP
 The tool supports both CTF version 1.8 (default) and CTF version 2, automatically selecting the appropriate MIP version for the Babeltrace2 sink.
+.SS LTTng trace discovery
+When a \fIlttng-trace\fR path is given, \fBftrace-to-ctf\fR recursively walks
+that directory and all of its subdirectories to locate the CTF trace
+directories it contains.  For each directory it queries the \fBsource.ctf.fs\fR
+component class (via the \fBbabeltrace.support-info\fR query object) to decide
+whether that directory is a CTF trace directory.  Directories that are
+recognized are used as inputs and are not descended into any further;
+directories that are not recognized are skipped and their children are
+inspected instead.  Symbolic links are not followed.
+.PP
+Discovered trace directories that report the same support-info group are
+combined into a single \fBsource.ctf.fs\fR component, while directories
+belonging to different traces are handled by separate source components.  This
+allows, for example, per-PID LTTng userspace traces to be converted in a single
+run.  The first discovered trace is additionally used to extract the clock
+metadata.  When \fB--verbose\fR is given, the discovery decisions (which
+directories are used or skipped) are logged.
 .SH OPTIONS
 .TP
 \fB-b, --begin \fIts\fR
