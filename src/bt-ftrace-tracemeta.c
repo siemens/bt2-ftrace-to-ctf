@@ -7,7 +7,13 @@
  * {
  *   trace: { (uid: str | uuid: str)? },
  *   stream: { id: int, name: str},
- *   clock: { offset_s: int, offset_c: int, frequency: int, (uid: str | uuid: str)? },
+ *   clock: { 
+ *     offset_s: int,
+ *     offset_c: int,
+ *     frequency: int,
+ *     origin-is-unix-epoch: bool,
+ *     (uid: str | uuid: str)?
+ *   },
  *   env: { { name: value }, ... }
  * }
  * The sink component uses the following initialization parameters:
@@ -177,6 +183,10 @@ static void emit_metadata_json(struct tracemeta_out *cm_out,
 
 	json_builder_set_member_name(builder, "frequency");
 	json_builder_add_int_value(builder, (gint64)freq);
+
+	json_builder_set_member_name(builder, "origin-is-unix-epoch");
+	json_builder_add_boolean_value(
+		builder, bt_clock_class_origin_is_unix_epoch(clock_cls));
 
 	if (cm_out->mip_version == 0) {
 		clock_uuid = bt_clock_class_get_uuid(clock_cls);
