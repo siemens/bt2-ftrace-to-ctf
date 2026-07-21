@@ -61,6 +61,18 @@
 
 #define NS_PER_S (1000 * 1000 * 1000)
 
+/* 
+ * Project-specific namespace for generated ftrace clock UUIDs.
+ * The clock UIDs for clock mono / mono_raw are intentionally not
+ * shared with the corresponding LTTng UIDs, as the ftrace clock's
+ * origin is not related back to the unix epoch.
+ */
+#define FTRACE_CLOCK_UUID_NAMESPACE                     \
+	{                                                   \
+		0xfc, 0xc2, 0xb9, 0xca, 0x5f, 0x9d, 0x4e, 0x51, \
+		0x82, 0xdc, 0x0e, 0x97, 0x41, 0x98, 0x54, 0xbc, \
+	}
+
 /* ports private data */
 struct port_in {
 	int cpu_id;
@@ -458,6 +470,41 @@ static void create_metadata_and_trace(bt_self_component *self_component,
 				ftrace_in->log_level,
 				"ftrace used non-monotonic clock \"%s\". Traces are likely misaligned.",
 				traceclock);
+		}
+	} else {
+		static const uuid_t clock_namespace = FTRACE_CLOCK_UUID_NAMESPACE;
+		uuid_t clock_uuid;
+		char clock_uid[UUID_STR_LEN];
+		char seed[64];
+
+		/*
+		 * Derive the clock UID from the clock name. When the clock origin
+		 * is unknown (no offset to the world clock is known), a monotonic
+		 * clock starts from an arbitrary, per-boot point, so its raw
+		 * timestamps are only comparable within the same trace. Mix the
+		 * per-trace trace id into the seed in that case, so clocks from
+		 * unrelated traces do not share a UID (which babeltrace would treat
+		 * as correlatable). All CPU streams of the same trace still share
+		 * one clock. When the origin is the Unix epoch, correlation goes
+		 * through the epoch, so the name-only UID is kept.
+		 */
+		const size_t name_len = strlen(traceclock);
+		size_t seed_len = name_len < sizeof(seed) ? name_len : sizeof(seed);
+		memcpy(seed, traceclock, seed_len);
+		if (!ftrace_in->clock_offset_ns &&
+			seed_len + sizeof(unsigned long long) <= sizeof(seed)) {
+			const unsigned long long traceid = tracecmd_get_traceid(tc_main);
+			memcpy(seed + seed_len, &traceid, sizeof(traceid));
+			seed_len += sizeof(traceid);
+		}
+		uuid_generate_md5(clock_uuid, clock_namespace, seed, seed_len);
+		if (mip_version == 0) {
+			bt_clock_class_set_uuid(clock_class, clock_uuid);
+		} else {
+#if HAS_BT2_CLOCK_UID
+			uuid_unparse(clock_uuid, clock_uid);
+			bt_clock_class_set_uid(clock_class, clock_uid);
+#endif
 		}
 	}
 
