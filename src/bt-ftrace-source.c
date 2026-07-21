@@ -73,6 +73,13 @@
 		0x82, 0xdc, 0x0e, 0x97, 0x41, 0x98, 0x54, 0xbc, \
 	}
 
+/* Project-specific namespace for generated ftrace trace UIDs */
+#define FTRACE_TRACE_UUID_NAMESPACE                     \
+	{                                                   \
+		0x1b, 0x02, 0x8a, 0x6a, 0x47, 0x7c, 0x4a, 0xa9, \
+		0x98, 0xa8, 0x92, 0x2b, 0xe8, 0xcf, 0x77, 0x78, \
+	}
+
 /* ports private data */
 struct port_in {
 	int cpu_id;
@@ -558,12 +565,28 @@ static void create_metadata_and_trace(bt_self_component *self_component,
 
 	/* Create a default trace from (instance of `trace_class`) */
 	bt_trace *trace = bt_trace_create(trace_class);
-	snprintf(NAME_BUF, sizeof(NAME_BUF), "%llu", tracecmd_get_traceid(tc_main));
+
+	/* Derive a unique, stable trace UID from the trace-cmd trace id */
+	static const uuid_t trace_namespace = FTRACE_TRACE_UUID_NAMESPACE;
+	const unsigned long long traceid = tracecmd_get_traceid(tc_main);
+	uuid_t trace_uuid;
+	char trace_uid[UUID_STR_LEN];
+	uuid_generate_md5(trace_uuid, trace_namespace, (const char *)&traceid,
+					  sizeof(traceid));
+	uuid_unparse(trace_uuid, trace_uid);
+	if (mip_version == 0) {
+		bt_trace_set_uuid(trace, trace_uuid);
+	} else {
 #if HAS_BT2_TRACE_UID
-	if (mip_version >= 2) {
-		bt_trace_set_uid(trace, NAME_BUF);
-	}
+		bt_trace_set_uid(trace, trace_uid);
 #endif
+	}
+	if (!ftrace_in->lttng_format) {
+		snprintf(NAME_BUF, sizeof(NAME_BUF), "0x%llx", traceid);
+		bt_trace_set_environment_entry_string(trace, "tracecmd_traceid",
+											  NAME_BUF);
+	}
+
 	if (ftrace_in->trace_name) {
 		bt_trace_set_name(trace, ftrace_in->trace_name);
 	}
