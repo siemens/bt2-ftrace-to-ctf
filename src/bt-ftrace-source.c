@@ -99,6 +99,8 @@ struct ftrace_in {
 	struct tc_buffer *tc_buffers;
 	unsigned int nb_tc_buffers;
 	struct tep_handle *tep;
+	/* full path to trace file on disk */
+	char *tracedat_path;
 
 	/* use LTTng event names and semantics on well-known events */
 	bt_bool lttng_format;
@@ -638,12 +640,14 @@ setup_ports_for_trace_buffer(struct ftrace_in *ftrace_in,
 			continue;
 		tracecmd_free_record(rec);
 
-		/* create stream */
-		snprintf(NAME_BUF, sizeof(NAME_BUF), "channel%d_%d", buffer_index,
-				 pd->cpu_id);
+		/* create stream, named "<trace-file>:channel<buffer>_<cpu>" */
 		pd->stream =
 			bt_stream_create(ftrace_in->stream_class, ftrace_in->trace);
-		bt_stream_set_name(pd->stream, NAME_BUF);
+		char *stream_name = g_strdup_printf("%s:channel%d_%d",
+											ftrace_in->tracedat_path,
+											buffer_index, pd->cpu_id);
+		bt_stream_set_name(pd->stream, stream_name);
+		g_free(stream_name);
 
 		if (buffer_name) {
 			snprintf(NAME_BUF, sizeof(NAME_BUF), "out-%s%d", buffer_name, i);
@@ -663,6 +667,7 @@ setup_ports_for_trace_buffer(struct ftrace_in *ftrace_in,
 static void ftrace_in_free(struct ftrace_in *ftrace_in)
 {
 	free(ftrace_in->tc_buffers);
+	free(ftrace_in->tracedat_path);
 	free(ftrace_in->clock_uid);
 	free(ftrace_in->trace_name);
 	free(ftrace_in->trace_hostname);
@@ -706,6 +711,7 @@ ftrace_in_initialize(bt_self_component_source *self_component_source,
 	const bt_value *path_value =
 		bt_value_array_borrow_element_by_index_const(inputs, 0);
 	const char *path = bt_value_string_get(path_value);
+	ftrace_in->tracedat_path = strdup(path);
 	const bt_value *lttng_val =
 		bt_value_map_borrow_entry_value_const(params, "lttng");
 	if (lttng_val) {
