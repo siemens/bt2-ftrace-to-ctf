@@ -16,6 +16,7 @@
  * 
  */
 
+#include "config.h"
 #include "bt-ftrace-tracemeta.h"
 #include "bt-ftrace-logging.h"
 
