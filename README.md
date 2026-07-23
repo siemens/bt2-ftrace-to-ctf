@@ -27,6 +27,8 @@ The plugin uses the following initialization parameters:
 - "symbolize": boolean, optional: symbolize function addresses
 - "clock-offset": uint64, optional: trace clock offset from world clock in ns
 - "clock-uid": string, optional: UID or UUID of the trace clock
+- "clock-namespace": string, optional: namespace of the trace clock (bt 2.1+)
+- "clock-name": string, optional: name of the trace clock (bt 2.1+)
 - "trace-name": string, optional: trace name and `env.trace_name` property
 - "trace-creation-datetime": string (ISO‑8601), optional: `env.trace_creation_datetime` property
 - "callstack": boolean, optional: add callstack information to event context (if available)
