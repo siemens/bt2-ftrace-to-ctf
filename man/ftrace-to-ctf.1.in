@@ -52,6 +52,12 @@ Trace clock offset in nanoseconds relative to the world clock.  If omitted, the 
 \fB-u, --clock-uid \fI(uid|uuid)\fR
 Clock UID (or UUID, depending on the MIP version).  Stored in the CTF metadata as \fBclock-uid\fR.
 .TP
+\fB--clock-namespace \fIns\fR
+Clock namespace, used together with the clock name and UID to form the clock identity in CTF 2 (MIP 1).  Ignored for CTF 1.8.
+.TP
+\fB--clock-name \fIname\fR
+Clock name, used together with the clock namespace and UID to form the clock identity in CTF 2 (MIP 1).  Ignored for CTF 1.8.
+.TP
 \fB-v, --verbose\fR
 Increase logging level.  Can be repeated to make the output more verbose.
 .TP

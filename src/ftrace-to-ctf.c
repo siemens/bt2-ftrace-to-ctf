@@ -27,6 +27,8 @@ typedef struct {
 	char *ctf_version;
 	uint64_t clock_offset;
 	char *clock_uid;
+	char *clock_namespace;
+	char *clock_name;
 	char *end;
 	int mip;
 	char *trace_datetime;
@@ -39,6 +41,8 @@ typedef struct {
 
 typedef struct {
 	char *clock_uid;
+	char *clock_namespace;
+	char *clock_name;
 	int64_t clock_offset_s;
 	uint64_t clock_offset_c;
 	uint64_t clock_freq;
@@ -63,6 +67,8 @@ static void print_usage(char *prog_name)
 		"  -o, --clock-offset <offset> Trace clock offset in ns to world clock\n"
 		"  -s, --symbolize       Symbolize function addresses\n"
 		"  -u, --clock-uid <(u)uid> Trace clock uuid or uid, depending on MIP version\n"
+		"      --clock-namespace <ns> Trace clock namespace (CTF 2 only)\n"
+		"      --clock-name <name> Trace clock name (CTF 2 only)\n"
 		"  -v, --verbose         Increase logging level (repeatable)\n"
 		"  -h, --help            Show this help message and exit\n",
 		basename(prog_name));
@@ -93,6 +99,8 @@ static void clear_opts(prog_opts *opts)
 	free(opts->begin);
 	free(opts->ctf_version);
 	free(opts->clock_uid);
+	free(opts->clock_namespace);
+	free(opts->clock_name);
 	free(opts->end);
 	free(opts->trace_datetime);
 	free(opts->trace_name);
@@ -104,6 +112,12 @@ static void clear_opts(prog_opts *opts)
 
 int parse_args(int argc, char *argv[], prog_opts *opts)
 {
+	/* Long-only option identifiers (outside the ASCII range). */
+	enum {
+		OPT_CLOCK_NAMESPACE = 256,
+		OPT_CLOCK_NAME,
+	};
+
 	/* Initialise defaults */
 	memset(opts, 0, sizeof(*opts));
 	opts->ctf_version = strdup("1.8");
@@ -116,6 +130,8 @@ int parse_args(int argc, char *argv[], prog_opts *opts)
 		{ "ctf-version", required_argument, 0 , 'c'},
 		{ "clock-offset", required_argument, 0, 'o'},
 		{ "clock-uid",   required_argument, 0, 'u' },
+		{ "clock-namespace", required_argument, 0, OPT_CLOCK_NAMESPACE },
+		{ "clock-name",  required_argument, 0, OPT_CLOCK_NAME },
 		{ "symbolize",   no_argument,       0, 's' },
 		{ "end",         required_argument, 0, 'e' },
 		{ "lttng",       no_argument,       0, 'l' },
@@ -165,6 +181,14 @@ int parse_args(int argc, char *argv[], prog_opts *opts)
 		case 'u':
 			free(opts->clock_uid);
 			opts->clock_uid = strdup(optarg);
+			break;
+		case OPT_CLOCK_NAMESPACE:
+			free(opts->clock_namespace);
+			opts->clock_namespace = strdup(optarg);
+			break;
+		case OPT_CLOCK_NAME:
+			free(opts->clock_name);
+			opts->clock_name = strdup(optarg);
 			break;
 		case 's':
 			opts->symbolize = true;
@@ -306,6 +330,16 @@ static int parse_trace_meta(const char *buffer, trace_metadata *trace_meta)
 		const char *uuid_str = json_object_get_string_member(clock_o, "uuid");
 		trace_meta->clock_uid = strdup(uuid_str);
 	}
+	const char *clock_ns =
+		json_object_get_string_member_with_default(clock_o, "namespace", "");
+	if (*clock_ns) {
+		trace_meta->clock_namespace = strdup(clock_ns);
+	}
+	const char *clock_name =
+		json_object_get_string_member_with_default(clock_o, "name", "");
+	if (*clock_name) {
+		trace_meta->clock_name = strdup(clock_name);
+	}
 
 	JsonObject *env_o = json_object_get_object_member(root_o, "env");
 	if (json_object_has_member(env_o, "trace_name")) {
@@ -441,6 +475,8 @@ static int get_metadata_from_lttng_trace(const bt_plugin *ftrace_plugin,
 		opts->clock_offset = trace_meta.clock_offset_s * trace_meta.clock_freq +
 							 trace_meta.clock_offset_c;
 		opts->clock_uid = trace_meta.clock_uid;
+		opts->clock_namespace = trace_meta.clock_namespace;
+		opts->clock_name = trace_meta.clock_name;
 		opts->trace_datetime = trace_meta.trace_datetime;
 		opts->trace_name = trace_meta.trace_name;
 	}
@@ -599,6 +635,14 @@ int main(int argc, char **argv)
 	if (opts.clock_uid) {
 		bt_value_map_insert_string_entry(source_params, "clock-uid",
 										 opts.clock_uid);
+	}
+	if (opts.clock_namespace) {
+		bt_value_map_insert_string_entry(source_params, "clock-namespace",
+										 opts.clock_namespace);
+	}
+	if (opts.clock_name) {
+		bt_value_map_insert_string_entry(source_params, "clock-name",
+										 opts.clock_name);
 	}
 	if (opts.trace_name) {
 		bt_value_map_insert_string_entry(source_params, "trace-name",
