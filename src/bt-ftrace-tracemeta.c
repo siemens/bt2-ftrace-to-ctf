@@ -12,7 +12,9 @@
  *     offset_c: int,
  *     frequency: int,
  *     origin-is-unix-epoch: bool,
- *     (uid: str | uuid: str)?
+ *     (uid: str | uuid: str)?,
+ *     namespace: str?,
+ *     name: str?
  *   },
  *   env: { { name: value }, ... }
  * }
@@ -200,6 +202,18 @@ static void emit_metadata_json(struct tracemeta_out *cm_out,
 		const char *clock_uid = bt_clock_class_get_uid(clock_cls);
 		json_builder_set_member_name(builder, "uid");
 		json_builder_add_string_value(builder, clock_uid);
+#endif
+#if HAS_BT2_CLOCK_NAMESPACE
+		const char *clock_ns = bt_clock_class_get_namespace(clock_cls);
+		if (clock_ns) {
+			json_builder_set_member_name(builder, "namespace");
+			json_builder_add_string_value(builder, clock_ns);
+		}
+		const char *clock_name = bt_clock_class_get_name(clock_cls);
+		if (clock_name) {
+			json_builder_set_member_name(builder, "name");
+			json_builder_add_string_value(builder, clock_name);
+		}
 #endif
 	}
 

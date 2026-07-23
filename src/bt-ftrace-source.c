@@ -11,6 +11,8 @@
  * "symbolize": boolean, optional: symbolize function addresses
  * "clock-offset": uint64, optional: trace clock offset from world clock in ns
  * "clock-uid": string, optional: UID or UUID of the trace clock
+ * "clock-namespace": string, optional: namespace of the trace clock (bt 2.1+)
+ * "clock-name": string, optional: name of the trace clock (bt 2.1+)
  * "trace-name": string, optional: trace name and `env.trace_name` property
  * "trace-creation-datetime": string (ISO‑8601), optional: `env.trace_creation_datetime` property
  *
@@ -80,6 +82,13 @@
 		0x98, 0xa8, 0x92, 0x2b, 0xe8, 0xcf, 0x77, 0x78, \
 	}
 
+/*
+ * Project-specific namespace string for generated ftrace clock identities
+ * (bt 2.1+). It is intentionally distinct from the LTTng clock namespace 
+ * (not based on the unix epoch).
+ */
+#define FTRACE_CLOCK_NAMESPACE "ftrace"
+
 /* ports private data */
 struct port_in {
 	int cpu_id;
@@ -128,6 +137,8 @@ struct ftrace_in {
 	/* clock offset to world clock in ns */
 	uint64_t clock_offset_ns;
 	char *clock_uid;
+	char *clock_namespace;
+	char *clock_name;
 
 	/* Event classes for each type of event (owned by this) */
 	GHashTable *event_classes;
@@ -473,6 +484,20 @@ static void create_metadata_and_trace(bt_self_component *self_component,
 #if HAS_BT2_CLOCK_UID
 			bt_clock_class_set_uid(clock_class, ftrace_in->clock_uid);
 #endif
+#if HAS_BT2_CLOCK_NAMESPACE
+			/*
+			 * Complete the bt 2.1 identity (namespace, name, uid) with
+			 * the adopted clock's namespace and name when provided, so
+			 * this clock matches its reference for correlation.
+			 */
+			if (ftrace_in->clock_namespace) {
+				bt_clock_class_set_namespace(clock_class,
+											 ftrace_in->clock_namespace);
+			}
+			if (ftrace_in->clock_name) {
+				bt_clock_class_set_name(clock_class, ftrace_in->clock_name);
+			}
+#endif
 		}
 		if (!clock_is_monotonic) {
 			BT_FTRACE_LOG_WARNING(
@@ -513,6 +538,14 @@ static void create_metadata_and_trace(bt_self_component *self_component,
 #if HAS_BT2_CLOCK_UID
 			uuid_unparse(clock_uuid, clock_uid);
 			bt_clock_class_set_uid(clock_class, clock_uid);
+#endif
+#if HAS_BT2_CLOCK_NAMESPACE
+			/*
+			 * Stamp the project namespace so the (namespace, name, uid)
+			 * identity is complete. The name was set above from the
+			 * trace clock name.
+			 */
+			bt_clock_class_set_namespace(clock_class, FTRACE_CLOCK_NAMESPACE);
 #endif
 		}
 	}
@@ -692,6 +725,8 @@ static void ftrace_in_free(struct ftrace_in *ftrace_in)
 	free(ftrace_in->tc_buffers);
 	free(ftrace_in->tracedat_path);
 	free(ftrace_in->clock_uid);
+	free(ftrace_in->clock_namespace);
+	free(ftrace_in->clock_name);
 	free(ftrace_in->trace_name);
 	free(ftrace_in->trace_hostname);
 	free(ftrace_in->trace_sysname);
@@ -755,6 +790,16 @@ ftrace_in_initialize(bt_self_component_source *self_component_source,
 		bt_value_map_borrow_entry_value_const(params, "clock-uid");
 	if (clock_uid_val) {
 		ftrace_in->clock_uid = strdup(bt_value_string_get(clock_uid_val));
+	}
+	const bt_value *clock_ns_val =
+		bt_value_map_borrow_entry_value_const(params, "clock-namespace");
+	if (clock_ns_val) {
+		ftrace_in->clock_namespace = strdup(bt_value_string_get(clock_ns_val));
+	}
+	const bt_value *clock_name_val =
+		bt_value_map_borrow_entry_value_const(params, "clock-name");
+	if (clock_name_val) {
+		ftrace_in->clock_name = strdup(bt_value_string_get(clock_name_val));
 	}
 	const bt_value *trace_name_val =
 		bt_value_map_borrow_entry_value_const(params, "trace-name");

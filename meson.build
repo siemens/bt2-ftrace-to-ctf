@@ -27,6 +27,9 @@ tc_has_reverse_it = cc.has_function('tracecmd_iterate_events_reverse',
 bt2_has_clock_uid = cc.has_function('bt_clock_class_set_uid',
                                     dependencies: babeltrace2_dep,
                                     required: false)
+bt2_has_clock_namespace = cc.has_function('bt_clock_class_set_namespace',
+                                          dependencies: babeltrace2_dep,
+                                          required: false)
 bt2_has_clock_unknown = cc.has_function('bt_clock_class_set_origin_unknown',
                                         dependencies: babeltrace2_dep,
                                         required: false)
@@ -45,6 +48,7 @@ conf_data = configuration_data({
   'version_patch': project_version_parts[2],
   'tracecmd_private_syms': get_option('tracecmd-internals').to_int(),
   'has_bt2_clock_uid': bt2_has_clock_uid.to_int(),
+  'has_bt2_clock_namespace': bt2_has_clock_namespace.to_int(),
   'has_bt2_clock_unknown': bt2_has_clock_unknown.to_int(),
   'has_bt2_trace_uid': bt2_has_trace_uid.to_int(),
   'has_bt2_new_dynamic_field_api': bt2_has_new_dynamic_field_api.to_int(),
