@@ -112,3 +112,4 @@ executable('ftrace-to-ctf',
 )
 
 subdir('man')
+subdir('docs')

@@ -4,3 +4,7 @@ option('tracecmd-internals',
        description: 'Enable code that depends on private libtracecmd symbols',
        type: 'boolean',
        value: false)
+option('build_docs',
+       description: 'Build Doxygen documentation',
+       type: 'boolean',
+       value: false)

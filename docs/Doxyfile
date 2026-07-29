@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: (C) 2026 Siemens
+# SPDX-License-Identifier: MIT
+
+DOXYFILE_ENCODING      = UTF-8
+PROJECT_NAME           = "bt2-ftrace-to-ctf"
+OUTPUT_DIRECTORY       = 
+OPTIMIZE_OUTPUT_FOR_C  = YES
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = YES
+EXTRACT_STATIC         = YES
+EXTRACT_LOCAL_METHODS  = YES
+GENERATE_TESTLIST      = NO
+GENERATE_BUGLIST       = NO
+GENERATE_DEPRECATEDLIST= NO
+INPUT                  = ../src ../README.md
+USE_MDFILE_AS_MAINPAGE = ../README.md
+INLINE_SOURCES         = YES
+GENERATE_LATEX         = NO

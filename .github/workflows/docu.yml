@@ -1,0 +1,69 @@
+# SPDX-FileCopyrightText: Copyright 2026 Siemens AG
+#
+# SPDX-License-Identifier: MIT
+
+name: Generate Doxygen Documentation
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  doxygen:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            doxygen \
+            graphviz \
+            meson \
+            ninja-build \
+            build-essential \
+            libbabeltrace2-dev \
+            libtraceevent-dev \
+            libtracecmd-dev \
+            libtracefs-dev \
+            libglib2.0-dev \
+            libjson-glib-dev
+
+      - name: Configure Meson build directory
+        run: meson setup builddir -Dbuild_docs=true
+
+      - name: Generate Doxygen documentation via Meson
+        run: ninja -C builddir docs
+
+      - name: Upload static files as artifact
+        if: github.event_name == 'push'
+        id: deployment
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./builddir/html
+    
+  deploy:
+    needs: doxygen
+    
+    permissions:
+      pages: write
+      id-token: write
+    
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
