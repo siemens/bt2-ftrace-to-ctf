@@ -59,7 +59,7 @@ static void print_usage(char *prog_name)
 		"Options:\n"
 		"  -b, --begin <ts>      skip until (babeltrace2-filter.utils.trimmer begin input)\n"
 		"  -C, --callstack       Include callstacks in the output\n"
-		"  -c, --ctf-version <v> CTF version to use (default: 1.8)\n"
+		"  -c, --ctf-version <v> CTF version to use (default: 2)\n"
 		"  -d, --trace-dt <name> ISO‑8601 timestamp of the trace\n"
 		"  -e, --end <ts>        trim after (babeltrace2-filter.utils.trimmer end input)\n"
 		"  -l, --lttng           Convert well-known events to LTTng representation (default: off)\n"
@@ -88,7 +88,7 @@ static bool check_ctf_version(const char *ctf_version, int *mip_version)
 		*mip_version = 0;
 		return true;
 	} else if (strcmp(ctf_version, "2") == 0) {
-		*mip_version = 1;
+		*mip_version = bt_get_maximal_mip_version() > 0 ? 1 : 0;
 		return true;
 	}
 	return false;
@@ -120,7 +120,7 @@ int parse_args(int argc, char *argv[], prog_opts *opts)
 
 	/* Initialise defaults */
 	memset(opts, 0, sizeof(*opts));
-	opts->ctf_version = strdup("1.8");
+	opts->ctf_version = strdup("2");
 	opts->loglevel = BT_LOGGING_LEVEL_WARNING;
 
 	// clang-format off
@@ -745,7 +745,9 @@ int main(int argc, char **argv)
 		bt_value_map_insert_string_entry(sink_params, "ctf-version",
 										 opts.ctf_version);
 	} else if (strcmp(opts.ctf_version, "2") == 0) {
-		fprintf(stderr, "on babeltrace 2.0, only CTF 1.8 is supported.\n");
+		fprintf(
+			stderr,
+			"on babeltrace 2.0, only CTF 1.8 is supported. Falling back to 1.8.\n");
 	}
 	if (opts.lttng && p_major >= 2 && p_minor >= 1) {
 		bt_value_map_insert_string_entry(sink_params, "create-lttng-index",
