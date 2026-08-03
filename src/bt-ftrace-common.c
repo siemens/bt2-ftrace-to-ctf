@@ -16,6 +16,41 @@
 
 #define NS_PER_S (1000 * 1000 * 1000)
 
+void ftrace_parse_common_params(const bt_value *params,
+								struct ftrace_common_options *options)
+{
+	const bt_value *value;
+
+	value = bt_value_map_borrow_entry_value_const(params, "lttng");
+	if (value)
+		options->config.lttng_format = bt_value_bool_get(value);
+	value = bt_value_map_borrow_entry_value_const(params, "symbolize");
+	if (value)
+		options->config.symbolize_funcs = bt_value_bool_get(value);
+	value = bt_value_map_borrow_entry_value_const(params, "callstack");
+	if (value)
+		options->config.with_callstacks = bt_value_bool_get(value);
+	value = bt_value_map_borrow_entry_value_const(params, "clock-offset");
+	if (value)
+		options->clock_offset_ns = bt_value_integer_unsigned_get(value);
+	value = bt_value_map_borrow_entry_value_const(params, "clock-uid");
+	if (value)
+		options->clock_uid = strdup(bt_value_string_get(value));
+	value = bt_value_map_borrow_entry_value_const(params, "clock-namespace");
+	if (value)
+		options->clock_namespace = strdup(bt_value_string_get(value));
+	value = bt_value_map_borrow_entry_value_const(params, "clock-name");
+	if (value)
+		options->clock_name = strdup(bt_value_string_get(value));
+	value = bt_value_map_borrow_entry_value_const(params, "trace-name");
+	if (value)
+		options->trace_name = strdup(bt_value_string_get(value));
+	value = bt_value_map_borrow_entry_value_const(params,
+												  "trace-creation-datetime");
+	if (value)
+		options->trace_creation_datetime = strdup(bt_value_string_get(value));
+}
+
 static bt_field_class *
 create_event_field_class(bt_trace_class *trace_class,
 						 const struct tep_format_field *field,
