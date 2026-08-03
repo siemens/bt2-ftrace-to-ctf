@@ -38,8 +38,9 @@ jobs:
     needs: generate-trace-data
     strategy:
       matrix:
-        distro: [ "debian:bookworm", "debian:trixie", "debian:forky", "ubuntu:noble" ]
-        meson_opts: [ "-Dtracecmd-internals=false", "-Dtracecmd-internals=true" ]
+        distro:
+          ["debian:bookworm", "debian:trixie", "debian:forky", "ubuntu:noble"]
+        meson_opts: ["-Dtracecmd-internals=false", "-Dtracecmd-internals=true"]
     container: ${{ matrix.distro }}
     steps:
       - name: checkout repository
@@ -77,7 +78,7 @@ jobs:
 
       - name: build components
         run: |
-          meson setup -Dbuildtype=debugoptimized ${{ matrix.meson_opts }} build
+          meson setup -Dbuildtype=debugoptimized ${{ matrix.meson_opts }} ${{ matrix.distro == 'debian:bookworm' && '-Dwith-live-source=false' || '' }} build
           cd build && ninja
       - name: static analysis
         if: matrix.distro == 'debian:trixie' || matrix.distro == 'debian:forky'
@@ -107,6 +108,12 @@ jobs:
         run: |
           babeltrace2 query -p "inputs=[trace.dat]" source.ftrace.tracedat babeltrace.trace-infos
           babeltrace2 query -p "inputs=[trace.sub.dat]" source.ftrace.tracedat babeltrace.trace-infos
+      - name: smoke test (negative) source.ftrace.live discovery
+        if: matrix.distro != 'debian:bookworm'
+        env:
+          BABELTRACE_PLUGIN_PATH: ${{ github.workspace }}/build
+        run: |
+          babeltrace2 query -p 'type="directory",input="/does/not/exist"' source.ftrace.live babeltrace.support-info | awk '$1 < 0.5 { exit 0 } { exit 1 }'
       - name: smoke test ftrace-to-ctf
         env:
           BABELTRACE_PLUGIN_PATH: ${{ github.workspace }}/build
