@@ -13,25 +13,29 @@ This repository contains two components:
 
 ## Babeltrace2 Plugin (ftrace)
 
-The plugin provides two components:
+The plugin provides three components:
 
 - `source.ftrace.tracedat`: read a trace.dat file
+- `source.ftrace.live`: read an already configured live kernel ftrace instance
 - `sink.ftrace.tracemeta`: emit clock definitions in JSON format for any stream begin message
+
+### Source Parameters
+
+Both source components accept these optional parameters:
+
+- `lttng`: use LTTng semantics for well-known events
+- `symbolize`: symbolize function addresses
+- `callstack`: add available callstack information to event context
+- `clock-offset`: trace clock offset from world clock in ns
+- `clock-uid`: UID or UUID of the trace clock
+- `clock-namespace`: trace clock namespace (Babeltrace 2.1+)
+- `clock-name`: trace clock name (Babeltrace 2.1+)
+- `trace-name`: trace name and `env.trace_name` property
+- `trace-creation-datetime`: ISO-8601 `env.trace_creation_datetime` property
 
 ### Plugin `source.ftrace.tracedat`
 
-The plugin uses the following initialization parameters:
-
-- "inputs": array of string, mandatory: providing exactly one input file path
-- "lttng": boolean, optional: indicating if LTTng semantics shall be used
-- "symbolize": boolean, optional: symbolize function addresses
-- "clock-offset": uint64, optional: trace clock offset from world clock in ns
-- "clock-uid": string, optional: UID or UUID of the trace clock
-- "clock-namespace": string, optional: namespace of the trace clock (bt 2.1+)
-- "clock-name": string, optional: name of the trace clock (bt 2.1+)
-- "trace-name": string, optional: trace name and `env.trace_name` property
-- "trace-creation-datetime": string (ISO‑8601), optional: `env.trace_creation_datetime` property
-- "callstack": boolean, optional: add callstack information to event context (if available)
+The mandatory `inputs` parameter is an array containing exactly one trace.dat file path.
 
 The plugin further implements the following query interfaces:
 
@@ -43,6 +47,39 @@ The plugin further implements the following query interfaces:
 ```bash
 trace-cmd record -C mono -e "sched:sched_switch" sleep 1
 babeltrace2 --plugin-path=. trace.dat
+```
+
+### Plugin `source.ftrace.live`
+
+**Requires libtracefs 1.8.0**.
+
+The live source consumes an existing tracefs buffer. It never enables events,
+starts or stops tracing, clears buffers, or creates and destroys instances.
+
+The mandatory `inputs` parameter is an array containing exactly one tracefs root (for example `/sys/kernel/tracing`) or existing instance directory (for example `/sys/kernel/tracing/instances/my-instance`).
+
+The source creates one output port per CPU. It is non-seekable and continues
+until Babeltrace destroys the graph. Packets align with tracefs ring-buffer
+sub-buffers. It implements the `babeltrace.support-info` and
+`babeltrace.trace-infos` query interfaces. Live stream ranges are reported as
+`0` to `INT64_MAX`.
+
+While a CPU buffer holds no data, the source never blocks the processing graph
+and reports "try again later" instead. Babeltrace then waits for the duration
+of `--retry-duration` (100 ms by default) before it polls the buffers again,
+so this value defines the polling interval and the latency of the live output.
+
+**Example:**
+
+```bash
+# Configure and start an isolated ftrace instance outside the plugin.
+trace-cmd start -B bt-live -e sched:sched_switch
+
+# Consume it without changing its configuration.
+babeltrace2 --plugin-path=. /sys/kernel/tracing/instances/bt-live
+
+# Poll the buffers every 10 ms instead of every 100 ms.
+babeltrace2 --plugin-path=. --retry-duration=10000 /sys/kernel/tracing/instances/bt-live
 ```
 
 ### Plugin `sink.ftrace.tracemeta`
