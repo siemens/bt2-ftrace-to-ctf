@@ -10,6 +10,8 @@
 
 #include "bt-ftrace-source.h"
 #include "bt-ftrace-source-query.h"
+#include "bt-ftrace-source-live.h"
+#include "bt-ftrace-source-live-query.h"
 #include "bt-ftrace-tracemeta.h"
 
 /* Mandatory */
@@ -47,6 +49,21 @@ BT_PLUGIN_SOURCE_COMPONENT_CLASS_MESSAGE_ITERATOR_CLASS_SEEK_NS_FROM_ORIGIN_METH
 BT_PLUGIN_SOURCE_COMPONENT_CLASS_GET_SUPPORTED_MIP_VERSIONS_METHOD(
 	tracedat, ftrace_get_supported_mip_versions);
 BT_PLUGIN_SOURCE_COMPONENT_CLASS_QUERY_METHOD(tracedat, ftrace_query_method);
+
+/* Define the `live` source component class */
+BT_PLUGIN_SOURCE_COMPONENT_CLASS(live, ftrace_live_message_iterator_next);
+BT_PLUGIN_SOURCE_COMPONENT_CLASS_DESCRIPTION(
+	live, "stream an already configured live kernel ftrace instance");
+BT_PLUGIN_SOURCE_COMPONENT_CLASS_INITIALIZE_METHOD(live,
+												   ftrace_live_initialize);
+BT_PLUGIN_SOURCE_COMPONENT_CLASS_FINALIZE_METHOD(live, ftrace_live_finalize);
+BT_PLUGIN_SOURCE_COMPONENT_CLASS_MESSAGE_ITERATOR_CLASS_INITIALIZE_METHOD(
+	live, ftrace_live_message_iterator_initialize);
+BT_PLUGIN_SOURCE_COMPONENT_CLASS_MESSAGE_ITERATOR_CLASS_FINALIZE_METHOD(
+	live, ftrace_live_message_iterator_finalize);
+BT_PLUGIN_SOURCE_COMPONENT_CLASS_GET_SUPPORTED_MIP_VERSIONS_METHOD(
+	live, ftrace_live_get_supported_mip_versions);
+BT_PLUGIN_SOURCE_COMPONENT_CLASS_QUERY_METHOD(live, ftrace_live_query_method);
 
 /* Define the `tracemeta` sink component class */
 BT_PLUGIN_SINK_COMPONENT_CLASS(tracemeta, tracemeta_out_consume);
