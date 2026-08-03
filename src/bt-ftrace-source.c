@@ -344,14 +344,10 @@ static void ftrace_in_free(struct ftrace_in *ftrace_in)
 {
 	free(ftrace_in->tc_buffers);
 	free(ftrace_in->tracedat_path);
-	free(ftrace_in->options.clock_uid);
-	free(ftrace_in->options.clock_namespace);
-	free(ftrace_in->options.clock_name);
-	free(ftrace_in->options.trace_name);
+	ftrace_common_opts_free(&ftrace_in->options);
 	free(ftrace_in->trace_hostname);
 	free(ftrace_in->trace_sysname);
 	free(ftrace_in->trace_kernel_release);
-	free(ftrace_in->options.trace_creation_datetime);
 	free(ftrace_in);
 }
 
