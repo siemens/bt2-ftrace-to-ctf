@@ -39,6 +39,19 @@ struct ftrace_pending_stack {
 	int ulen;
 };
 
+struct ftrace_common_options {
+	struct ftrace_common_config config;
+	uint64_t clock_offset_ns;
+	char *clock_uid;
+	char *clock_namespace;
+	char *clock_name;
+	char *trace_name;
+	char *trace_creation_datetime;
+};
+
+void ftrace_parse_common_params(const bt_value *params,
+								struct ftrace_common_options *options);
+
 bt_event_class *
 ftrace_create_event_class(bt_stream_class *stream_class,
 						  struct tep_event *event,

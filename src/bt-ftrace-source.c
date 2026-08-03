@@ -62,8 +62,6 @@
 /* currently an arbitrary number, but helps to test the next package code path */
 #define MAX_EVENTS_PER_PACKET 1024
 
-#define NS_PER_S (1000 * 1000 * 1000)
-
 /* ports private data */
 struct port_in {
 	int cpu_id;
@@ -93,27 +91,15 @@ struct ftrace_in {
 	/* full path to trace file on disk */
 	char *tracedat_path;
 
-	/* use LTTng event names and semantics on well-known events */
-	bt_bool lttng_format;
-	/* symbolize function addresses of well-known fields */
-	bt_bool symbolize_funcs;
-	/* include callstacks in the output */
-	bt_bool with_callstacks;
+	/* Shared source parameters and metadata overrides. */
+	struct ftrace_common_options options;
 
 	/* tracer and trace metadata */
-	char *trace_name;
 	char *trace_sysname;
 	char *trace_hostname;
 	char *trace_kernel_release;
-	char *trace_creation_datetime;
 	int tracer_version_major;
 	int tracer_version_minor;
-
-	/* clock offset to world clock in ns */
-	uint64_t clock_offset_ns;
-	char *clock_uid;
-	char *clock_namespace;
-	char *clock_name;
 
 	/* Event classes for each type of event (owned by this) */
 	GHashTable *event_classes;
@@ -131,9 +117,9 @@ static struct ftrace_common_config
 get_common_config(const struct ftrace_in *ftrace_in)
 {
 	return (struct ftrace_common_config){
-		.lttng_format = ftrace_in->lttng_format,
-		.symbolize_funcs = ftrace_in->symbolize_funcs,
-		.with_callstacks = ftrace_in->with_callstacks,
+		.lttng_format = ftrace_in->options.config.lttng_format,
+		.symbolize_funcs = ftrace_in->options.config.symbolize_funcs,
+		.with_callstacks = ftrace_in->options.config.with_callstacks,
 		.log_level = ftrace_in->log_level,
 		.mip_version = ftrace_in->mip_version,
 	};
@@ -172,14 +158,9 @@ static void create_metadata_and_trace(bt_self_component *self_component,
 	const uint64_t mip_version =
 		bt_self_component_get_graph_mip_version(self_component);
 	ftrace_in->mip_version = mip_version;
-	bt_bool clock_is_monotonic = true;
 
 	/* Create a default trace class */
 	bt_trace_class *trace_class = bt_trace_class_create(self_component);
-
-	/* Create a stream trace class within `trace_class` */
-	bt_stream_class *stream_class = bt_stream_class_create(trace_class);
-	bt_stream_class_set_name(stream_class, "ftrace-stream");
 
 	struct tracecmd_input *tc_main = ftrace_in->tc_buffers[0].tc_input;
 
@@ -191,50 +172,14 @@ static void create_metadata_and_trace(bt_self_component *self_component,
 #endif
 	/* Create a default clock class (1 GHz frequency) */
 	bt_clock_class *clock_class = bt_clock_class_create(self_component);
-	if (strcmp(traceclock, "mono") == 0 ||
-		strcmp(traceclock, "mono_raw") == 0) {
-		bt_clock_class_set_name(clock_class, "monotonic");
-		bt_clock_class_set_description(clock_class, "Monotonic Clock");
-	} else {
-		clock_is_monotonic = false;
-		bt_clock_class_set_name(clock_class, traceclock);
-	}
-	/* make the clock compatible with an LTTng US clock definition */
-	if (ftrace_in->clock_offset_ns) {
-		bt_clock_class_set_offset(clock_class,
-								  ftrace_in->clock_offset_ns / NS_PER_S,
-								  ftrace_in->clock_offset_ns % NS_PER_S);
-		bt_clock_class_origin_is_unix_epoch(clock_class);
-	} else {
-#if HAS_BT2_CLOCK_UNKNOWN
-		bt_clock_class_set_origin_unknown(clock_class);
-#endif
-	}
-	if (ftrace_in->clock_uid) {
-		uuid_t clock_uuid;
-		if (mip_version == 0) {
-			uuid_parse(ftrace_in->clock_uid, clock_uuid);
-			bt_clock_class_set_uuid(clock_class, clock_uuid);
-		} else {
-#if HAS_BT2_CLOCK_UID
-			bt_clock_class_set_uid(clock_class, ftrace_in->clock_uid);
-#endif
-#if HAS_BT2_CLOCK_NAMESPACE
-			/*
-			 * Complete the bt 2.1 identity (namespace, name, uid) with
-			 * the adopted clock's namespace and name when provided, so
-			 * this clock matches its reference for correlation.
-			 */
-			if (ftrace_in->clock_namespace) {
-				bt_clock_class_set_namespace(clock_class,
-											 ftrace_in->clock_namespace);
-			}
-			if (ftrace_in->clock_name) {
-				bt_clock_class_set_name(clock_class, ftrace_in->clock_name);
-			}
-#endif
-		}
-		if (!clock_is_monotonic) {
+	ftrace_configure_clock(clock_class, traceclock,
+						   ftrace_in->options.clock_name,
+						   ftrace_in->options.clock_offset_ns,
+						   ftrace_in->options.clock_uid,
+						   ftrace_in->options.clock_namespace, mip_version);
+	if (ftrace_in->options.clock_uid) {
+		if (strcmp(traceclock, "mono") != 0 &&
+			strcmp(traceclock, "mono_raw") != 0) {
 			BT_FTRACE_LOG_WARNING(
 				ftrace_in->log_level,
 				"ftrace used non-monotonic clock \"%s\". Traces are likely misaligned.",
@@ -260,7 +205,7 @@ static void create_metadata_and_trace(bt_self_component *self_component,
 		const size_t name_len = strlen(traceclock);
 		size_t seed_len = name_len < sizeof(seed) ? name_len : sizeof(seed);
 		memcpy(seed, traceclock, seed_len);
-		if (!ftrace_in->clock_offset_ns &&
+		if (!ftrace_in->options.clock_offset_ns &&
 			seed_len + sizeof(unsigned long long) <= sizeof(seed)) {
 			const unsigned long long traceid = tracecmd_get_traceid(tc_main);
 			memcpy(seed + seed_len, &traceid, sizeof(traceid));
@@ -293,44 +238,14 @@ static void create_metadata_and_trace(bt_self_component *self_component,
 	 * Any event message created for such a stream has a snapshot of the
 	 * stream's default clock.
 	 */
-	bt_stream_class_set_default_clock_class(stream_class, clock_class);
-	bt_stream_class_set_supports_discarded_events(stream_class, BT_TRUE,
-												  BT_TRUE);
-
-#if USE_PACKAGES
-	bt_stream_class_set_supports_packets(stream_class, BT_TRUE, BT_TRUE,
-										 BT_TRUE);
-	bt_stream_class_set_supports_discarded_packets(stream_class, BT_TRUE,
-												   BT_TRUE);
-
-	bt_field_class *packet_ctx_class =
-		bt_field_class_structure_create(trace_class);
-	bt_field_class *field_cpuid_class =
-		bt_field_class_integer_unsigned_create(trace_class);
-	bt_field_class_integer_set_field_value_range(field_cpuid_class, 32);
-	bt_field_class_structure_append_member(packet_ctx_class, "cpu_id",
-										   field_cpuid_class);
-	bt_stream_class_set_packet_context_field_class(stream_class,
-												   packet_ctx_class);
-	bt_field_class_put_ref(field_cpuid_class);
-	bt_field_class_put_ref(packet_ctx_class);
-#endif
+	bt_stream_class *stream_class =
+		ftrace_create_stream_class(trace_class, clock_class, USE_PACKAGES);
 
 	struct tep_handle *tep =
 		tracecmd_get_tep(ftrace_in->tc_buffers[0].tc_input);
-	struct tep_event **events = NULL;
+	const struct ftrace_common_config config = get_common_config(ftrace_in);
 	ftrace_in->event_classes =
-		g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL,
-							  (GDestroyNotify)bt_event_class_put_ref);
-	events = tep_list_events(tep, TEP_EVENT_SORT_ID);
-	for (int i = 0; events[i]; i++) {
-		const struct ftrace_common_config config = get_common_config(ftrace_in);
-		const bt_event_class *event_class =
-			ftrace_create_event_class(stream_class, events[i], &config);
-		g_hash_table_insert(ftrace_in->event_classes,
-							(gpointer)((uintptr_t)events[i]->id),
-							(gpointer)event_class);
-	}
+		ftrace_create_event_classes(tep, stream_class, &config);
 
 	/* Create a default trace from (instance of `trace_class`) */
 	bt_trace *trace = bt_trace_create(trace_class);
@@ -350,51 +265,19 @@ static void create_metadata_and_trace(bt_self_component *self_component,
 		bt_trace_set_uid(trace, trace_uid);
 #endif
 	}
-	if (!ftrace_in->lttng_format) {
+	if (!ftrace_in->options.config.lttng_format) {
 		snprintf(NAME_BUF, sizeof(NAME_BUF), "0x%llx", traceid);
 		bt_trace_set_environment_entry_string(trace, "tracecmd_traceid",
 											  NAME_BUF);
 	}
 
-	if (ftrace_in->trace_name) {
-		bt_trace_set_name(trace, ftrace_in->trace_name);
-	}
-	bt_trace_set_environment_entry_string(trace, "domain", "kernel");
-	bt_trace_set_environment_entry_string(trace, "sysname",
-										  ftrace_in->trace_sysname);
-	if (ftrace_in->trace_kernel_release) {
-		bt_trace_set_environment_entry_string(trace, "kernel_release",
-											  ftrace_in->trace_kernel_release);
-	}
-	bt_trace_set_environment_entry_string(trace, "trace_buffering_scheme",
-										  "global");
-	if (ftrace_in->trace_name) {
-		bt_trace_set_environment_entry_string(trace, "trace_name",
-											  ftrace_in->trace_name);
-	}
-	/* The CTF sink dispatches based on this value. Fake it */
-	bt_trace_set_environment_entry_string(
-		trace, "tracer_name",
-		ftrace_in->lttng_format ? "lttng-modules" : "ftrace");
-
-	bt_trace_set_environment_entry_integer(trace, "tracer_major",
-										   ftrace_in->lttng_format ?
-											   LTTNG_VERSION_MAJOR :
-											   ftrace_in->tracer_version_major);
-	bt_trace_set_environment_entry_integer(trace, "tracer_minor",
-										   ftrace_in->lttng_format ?
-											   LTTNG_VERSION_MINOR :
-											   ftrace_in->tracer_version_minor);
-
-	if (ftrace_in->trace_hostname) {
-		bt_trace_set_environment_entry_string(trace, "hostname",
-											  ftrace_in->trace_hostname);
-	}
-	if (ftrace_in->trace_creation_datetime) {
-		bt_trace_set_environment_entry_string(
-			trace, "trace_creation_datetime",
-			ftrace_in->trace_creation_datetime);
-	}
+	ftrace_set_trace_environment(trace, &config, ftrace_in->trace_sysname,
+								 ftrace_in->trace_kernel_release,
+								 ftrace_in->trace_hostname,
+								 ftrace_in->options.trace_name,
+								 ftrace_in->options.trace_creation_datetime,
+								 ftrace_in->tracer_version_major,
+								 ftrace_in->tracer_version_minor);
 
 	ftrace_in->trace = trace;
 	ftrace_in->stream_class = stream_class;
@@ -460,14 +343,14 @@ static void ftrace_in_free(struct ftrace_in *ftrace_in)
 {
 	free(ftrace_in->tc_buffers);
 	free(ftrace_in->tracedat_path);
-	free(ftrace_in->clock_uid);
-	free(ftrace_in->clock_namespace);
-	free(ftrace_in->clock_name);
-	free(ftrace_in->trace_name);
+	free(ftrace_in->options.clock_uid);
+	free(ftrace_in->options.clock_namespace);
+	free(ftrace_in->options.clock_name);
+	free(ftrace_in->options.trace_name);
 	free(ftrace_in->trace_hostname);
 	free(ftrace_in->trace_sysname);
 	free(ftrace_in->trace_kernel_release);
-	free(ftrace_in->trace_creation_datetime);
+	free(ftrace_in->options.trace_creation_datetime);
 	free(ftrace_in);
 }
 
@@ -506,53 +389,8 @@ ftrace_in_initialize(bt_self_component_source *self_component_source,
 		bt_value_array_borrow_element_by_index_const(inputs, 0);
 	const char *path = bt_value_string_get(path_value);
 	ftrace_in->tracedat_path = strdup(path);
-	const bt_value *lttng_val =
-		bt_value_map_borrow_entry_value_const(params, "lttng");
-	if (lttng_val) {
-		ftrace_in->lttng_format = bt_value_bool_get(lttng_val);
-	}
-	const bt_value *symbolize_val =
-		bt_value_map_borrow_entry_value_const(params, "symbolize");
-	if (symbolize_val) {
-		ftrace_in->symbolize_funcs = bt_value_bool_get(symbolize_val);
-	}
-	const bt_value *clock_of_val =
-		bt_value_map_borrow_entry_value_const(params, "clock-offset");
-	if (clock_of_val) {
-		ftrace_in->clock_offset_ns =
-			bt_value_integer_unsigned_get(clock_of_val);
-	}
-	const bt_value *clock_uid_val =
-		bt_value_map_borrow_entry_value_const(params, "clock-uid");
-	if (clock_uid_val) {
-		ftrace_in->clock_uid = strdup(bt_value_string_get(clock_uid_val));
-	}
-	const bt_value *clock_ns_val =
-		bt_value_map_borrow_entry_value_const(params, "clock-namespace");
-	if (clock_ns_val) {
-		ftrace_in->clock_namespace = strdup(bt_value_string_get(clock_ns_val));
-	}
-	const bt_value *clock_name_val =
-		bt_value_map_borrow_entry_value_const(params, "clock-name");
-	if (clock_name_val) {
-		ftrace_in->clock_name = strdup(bt_value_string_get(clock_name_val));
-	}
-	const bt_value *trace_name_val =
-		bt_value_map_borrow_entry_value_const(params, "trace-name");
-	if (trace_name_val) {
-		ftrace_in->trace_name = strdup(bt_value_string_get(trace_name_val));
-	}
-	const bt_value *trace_date_val = bt_value_map_borrow_entry_value_const(
-		params, "trace-creation-datetime");
-	if (trace_date_val) {
-		ftrace_in->trace_creation_datetime =
-			strdup(bt_value_string_get(trace_date_val));
-	}
-	const bt_value *callstack_val =
-		bt_value_map_borrow_entry_value_const(params, "callstack");
-	if (callstack_val) {
-		ftrace_in->with_callstacks = bt_value_bool_get(callstack_val);
-	}
+	ftrace_in->options.config.log_level = ftrace_in->log_level;
+	ftrace_parse_common_params(params, &ftrace_in->options);
 
 	struct tracecmd_input *tc_main =
 		tracecmd_open(path, TRACECMD_FL_LOAD_NO_PLUGINS);
