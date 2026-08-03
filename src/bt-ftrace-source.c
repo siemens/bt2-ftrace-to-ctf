@@ -37,6 +37,7 @@
 #define _GNU_SOURCE
 
 #include "config.h"
+#include "bt-ftrace-common.h"
 #include "bt-ftrace-lttng-events.h"
 #include "bt-ftrace-logging.h"
 #include "bt-ftrace-source.h"
@@ -62,32 +63,6 @@
 #define MAX_EVENTS_PER_PACKET 1024
 
 #define NS_PER_S (1000 * 1000 * 1000)
-
-/* 
- * Project-specific namespace for generated ftrace clock UUIDs.
- * The clock UIDs for clock mono / mono_raw are intentionally not
- * shared with the corresponding LTTng UIDs, as the ftrace clock's
- * origin is not related back to the unix epoch.
- */
-#define FTRACE_CLOCK_UUID_NAMESPACE                     \
-	{                                                   \
-		0xfc, 0xc2, 0xb9, 0xca, 0x5f, 0x9d, 0x4e, 0x51, \
-		0x82, 0xdc, 0x0e, 0x97, 0x41, 0x98, 0x54, 0xbc, \
-	}
-
-/* Project-specific namespace for generated ftrace trace UIDs */
-#define FTRACE_TRACE_UUID_NAMESPACE                     \
-	{                                                   \
-		0x1b, 0x02, 0x8a, 0x6a, 0x47, 0x7c, 0x4a, 0xa9, \
-		0x98, 0xa8, 0x92, 0x2b, 0xe8, 0xcf, 0x77, 0x78, \
-	}
-
-/*
- * Project-specific namespace string for generated ftrace clock identities
- * (bt 2.1+). It is intentionally distinct from the LTTng clock namespace 
- * (not based on the unix epoch).
- */
-#define FTRACE_CLOCK_NAMESPACE "ftrace"
 
 /* ports private data */
 struct port_in {
@@ -152,6 +127,18 @@ struct ftrace_in {
 	uint64_t mip_version;
 };
 
+static struct ftrace_common_config
+get_common_config(const struct ftrace_in *ftrace_in)
+{
+	return (struct ftrace_common_config){
+		.lttng_format = ftrace_in->lttng_format,
+		.symbolize_funcs = ftrace_in->symbolize_funcs,
+		.with_callstacks = ftrace_in->with_callstacks,
+		.log_level = ftrace_in->log_level,
+		.mip_version = ftrace_in->mip_version,
+	};
+}
+
 /*
  * Parse options of the trace.dat file
  */
@@ -173,258 +160,6 @@ static void parse_tracedat_opts(struct ftrace_in *ftrace_in)
 #else
 	ftrace_in->trace_sysname = strdup("Linux");
 #endif
-}
-
-static bt_field_class *
-create_event_field_class(bt_trace_class *trace_class,
-						 const struct tep_format_field *field,
-						 const struct ftrace_in *ftrace_in)
-{
-	const unsigned long flags = field->flags;
-	const bt_logging_level loglvl = ftrace_in->log_level;
-	bt_field_class *field_class = NULL;
-	int field_size = field->size;
-
-	if (flags & TEP_FIELD_IS_ARRAY && field->arraylen) {
-		field_size = field_size / field->arraylen;
-	}
-
-	if (flags & TEP_FIELD_IS_STRING) {
-		field_class = bt_field_class_string_create(trace_class);
-	} else if ((flags & TEP_FIELD_IS_DYNAMIC ||
-				flags & TEP_FIELD_IS_RELATIVE) ||
-			   field_size == 0 || field_size > 8) {
-		BT_FTRACE_LOG_DEBUG(loglvl, "   skip field %s, type: %s", field->name,
-							field->type);
-		/* TODO */
-		return NULL;
-	} else if (flags & TEP_FIELD_IS_SIGNED) {
-		field_class = bt_field_class_integer_signed_create(trace_class);
-		bt_field_class_integer_set_field_value_range(field_class,
-													 field_size * 8);
-	} else {
-		field_class = bt_field_class_integer_unsigned_create(trace_class);
-		bt_field_class_integer_set_field_value_range(field_class,
-													 field_size * 8);
-	}
-
-	/* set number formatting options */
-	bt_field_class_type field_class_type = bt_field_class_get_type(field_class);
-	if (flags & TEP_FIELD_IS_POINTER &&
-		bt_field_class_type_is(field_class_type, BT_FIELD_CLASS_TYPE_INTEGER)) {
-		bt_field_class_integer_set_preferred_display_base(
-			field_class,
-			BT_FIELD_CLASS_INTEGER_PREFERRED_DISPLAY_BASE_HEXADECIMAL);
-	}
-
-	return field_class;
-}
-
-/**
- * Create a dynamic array to store callstack addresses or symbolized names.
- */
-static bt_field_class *create_callstack_field_class(bt_trace_class *trace_class,
-													int mip_version,
-													bt_bool symbolize)
-{
-	bt_field_class *field_class = NULL;
-	bt_field_class *elem_class;
-	if (symbolize) {
-		elem_class = bt_field_class_string_create(trace_class);
-	} else {
-		elem_class = bt_field_class_integer_unsigned_create(trace_class);
-		bt_field_class_integer_set_field_value_range(elem_class, 64);
-		bt_field_class_integer_set_preferred_display_base(
-			elem_class,
-			BT_FIELD_CLASS_INTEGER_PREFERRED_DISPLAY_BASE_HEXADECIMAL);
-	}
-	if (mip_version == 0) {
-		field_class =
-			bt_field_class_array_dynamic_create(trace_class, elem_class, NULL);
-	} else {
-#if HAS_BT2_NEW_DYNAMIC_FIELD_API
-		field_class =
-			bt_field_class_array_dynamic_without_length_field_location_create(
-				trace_class, elem_class);
-#else
-		/* MIP 1 is only support if new API is available */
-#endif
-	}
-	bt_field_class_put_ref(elem_class);
-	return field_class;
-}
-
-/*
- * Append common context fields to the context field class.
- * The following fields are added (and must be set when adding a event instance)
- * common_pid, task, latency
- */
-static void append_common_context_fields(bt_trace_class *trace_class,
-										 bt_field_class *context_field_class,
-										 struct tep_event *event,
-										 const struct ftrace_in *ftrace_in)
-{
-	bt_field_class *field_class;
-	const char *field_name_out;
-
-	/* common_pid */
-	field_class = bt_field_class_integer_signed_create(trace_class);
-	bt_field_class_integer_set_field_value_range(field_class, 32);
-	field_name_out = ftrace_in->lttng_format ?
-						 lttng_get_field_name_from_event(event, "common_pid") :
-						 "common_pid";
-	bt_field_class_structure_append_member(context_field_class, field_name_out,
-										   field_class);
-	bt_field_class_put_ref(field_class);
-
-	/* comm name */
-	field_class = bt_field_class_string_create(trace_class);
-	field_name_out = ftrace_in->lttng_format ?
-						 lttng_get_field_name_from_event(event, "task") :
-						 "task";
-	bt_field_class_structure_append_member(context_field_class, field_name_out,
-										   field_class);
-	bt_field_class_put_ref(field_class);
-
-	/* latency flags */
-	field_class = bt_field_class_string_create(trace_class);
-	bt_field_class_structure_append_member(context_field_class, "latency",
-										   field_class);
-	bt_field_class_put_ref(field_class);
-
-	if (ftrace_in->with_callstacks) {
-		/* kernel stack */
-		field_class = create_callstack_field_class(
-			trace_class, ftrace_in->mip_version, ftrace_in->symbolize_funcs);
-		field_name_out =
-			ftrace_in->lttng_format ?
-				lttng_get_field_name_from_event(event, "kernel_stack") :
-				"kernel_stack";
-		bt_field_class_structure_append_member(context_field_class,
-											   field_name_out, field_class);
-		bt_field_class_put_ref(field_class);
-
-		/* user stack */
-		field_class = create_callstack_field_class(
-			trace_class, ftrace_in->mip_version, false);
-		field_name_out =
-			ftrace_in->lttng_format ?
-				lttng_get_field_name_from_event(event, "user_stack") :
-				"user_stack";
-		bt_field_class_structure_append_member(context_field_class,
-											   field_name_out, field_class);
-		bt_field_class_put_ref(field_class);
-	}
-}
-
-/*
- * Creates an event class within `stream_class` from a ftrace event.
- */
-static bt_event_class *create_event_class(bt_stream_class *stream_class,
-										  struct tep_event *event,
-										  const struct ftrace_in *ftrace_in)
-{
-	char NAME_BUF[128];
-	struct tep_format_field **fields = NULL;
-	bt_field_class *field_class;
-	const bt_logging_level loglvl = ftrace_in->log_level;
-
-	/* Borrow trace class from stream class */
-	bt_trace_class *trace_class =
-		bt_stream_class_borrow_trace_class(stream_class);
-
-	/* Create a default event class */
-	bt_event_class *event_class = bt_event_class_create(stream_class);
-
-	/*
-	* Create empty structure field classes to be used as the
-	* event class's payload / context field class.
-	*/
-	bt_field_class *payload_field_class =
-		bt_field_class_structure_create(trace_class);
-	bt_field_class *context_field_class =
-		bt_field_class_structure_create(trace_class);
-
-	/* Name the event class */
-	if (ftrace_in->lttng_format) {
-		snprintf(NAME_BUF, sizeof(NAME_BUF), "%s",
-				 lttng_get_event_name_from_event(event));
-	} else {
-		snprintf(NAME_BUF, sizeof(NAME_BUF), "%s:%s", event->system,
-				 event->name);
-	}
-	bt_event_class_set_name(event_class, NAME_BUF);
-	BT_FTRACE_LOG_INFO(loglvl, "create event %s", NAME_BUF);
-
-	/* common fields are specific context fields */
-	append_common_context_fields(trace_class, context_field_class, event,
-								 ftrace_in);
-
-	fields = tep_event_fields(event);
-	for (int j = 0; fields[j]; j++) {
-		/* field name in input trace */
-		const char *field_name_in = fields[j]->name;
-		/* field name in output trace*/
-		const char *field_name_out = fields[j]->name;
-		BT_FTRACE_LOG_DEBUG(loglvl, "  %s:%s:%d:%d|%d", field_name_in,
-							fields[j]->type, fields[j]->offset, fields[j]->size,
-							fields[j]->arraylen);
-
-		if (ftrace_in->lttng_format) {
-			if (event_system_is("syscalls", event) &&
-				strcmp(field_name_in, "__syscall_nr") == 0)
-				continue;
-
-			field_name_out =
-				lttng_get_field_name_from_event(event, field_name_in);
-		}
-		const unsigned long flags = fields[j]->flags;
-		if (ftrace_in->symbolize_funcs &&
-			event_field_is_symbolic(event, field_name_in)) {
-			field_class = bt_field_class_string_create(trace_class);
-		} else if (flags & TEP_FIELD_IS_STRING) {
-			/* strings are character arrays in tracefs, but we map them as strings */
-			field_class =
-				create_event_field_class(trace_class, fields[j], ftrace_in);
-		} else if (flags & TEP_FIELD_IS_ARRAY) {
-			bt_field_class *member_class =
-				create_event_field_class(trace_class, fields[j], ftrace_in);
-			if (!member_class)
-				continue;
-
-			field_class = bt_field_class_array_static_create(
-				trace_class, member_class, fields[j]->arraylen);
-			bt_field_class_put_ref(member_class);
-		} else {
-			field_class =
-				create_event_field_class(trace_class, fields[j], ftrace_in);
-		}
-		if (!field_class)
-			continue;
-
-		if (bt_field_class_structure_borrow_member_by_name(payload_field_class,
-														   field_name_out)) {
-			BT_FTRACE_LOG_WARNING(loglvl,
-								  "   skip duplicated field %s, type: %s on %s",
-								  field_name_out, fields[j]->type, NAME_BUF);
-		} else {
-			bt_field_class_structure_append_member(payload_field_class,
-												   field_name_out, field_class);
-		}
-		bt_field_class_put_ref(field_class);
-	}
-	free(fields);
-
-	/* Set the event class's payload / context field class */
-	bt_event_class_set_payload_field_class(event_class, payload_field_class);
-	bt_event_class_set_specific_context_field_class(event_class,
-													context_field_class);
-
-	/* Put the references we don't need anymore */
-	bt_field_class_put_ref(payload_field_class);
-	bt_field_class_put_ref(context_field_class);
-
-	return event_class;
 }
 
 /*
@@ -545,7 +280,7 @@ static void create_metadata_and_trace(bt_self_component *self_component,
 			 * identity is complete. The name was set above from the
 			 * trace clock name.
 			 */
-			bt_clock_class_set_namespace(clock_class, FTRACE_CLOCK_NAMESPACE);
+			bt_clock_class_set_namespace(clock_class, FTRACE_NAMESPACE);
 #endif
 		}
 	}
@@ -589,8 +324,9 @@ static void create_metadata_and_trace(bt_self_component *self_component,
 							  (GDestroyNotify)bt_event_class_put_ref);
 	events = tep_list_events(tep, TEP_EVENT_SORT_ID);
 	for (int i = 0; events[i]; i++) {
+		const struct ftrace_common_config config = get_common_config(ftrace_in);
 		const bt_event_class *event_class =
-			create_event_class(stream_class, events[i], ftrace_in);
+			ftrace_create_event_class(stream_class, events[i], &config);
 		g_hash_table_insert(ftrace_in->event_classes,
 							(gpointer)((uintptr_t)events[i]->id),
 							(gpointer)event_class);
@@ -919,12 +655,7 @@ struct ftrace_in_message_iterator {
 	unsigned long long last_rec_ts;
 
 	/* saved stack */
-	struct pending_stack {
-		uint64_t *kernel_stack;
-		int klen;
-		uint64_t *user_stack;
-		int ulen;
-	} pending_stack;
+	struct ftrace_pending_stack pending_stack;
 
 	/* trace sequence buffer */
 	struct trace_seq seq;
@@ -976,19 +707,6 @@ ftrace_in_message_iterator_initialize(
 }
 
 /*
- * Free and reset the pending stack buffers.
- */
-static void clear_pending_stack(struct pending_stack *ps)
-{
-	free(ps->kernel_stack);
-	ps->kernel_stack = NULL;
-	ps->klen = 0;
-	free(ps->user_stack);
-	ps->user_stack = NULL;
-	ps->ulen = 0;
-}
-
-/*
  * Finalizes the message iterator.
  */
 void ftrace_in_message_iterator_finalize(
@@ -998,7 +716,7 @@ void ftrace_in_message_iterator_finalize(
 	struct ftrace_in_message_iterator *ftrace_in_iter =
 		bt_self_message_iterator_get_data(self_message_iterator);
 
-	clear_pending_stack(&ftrace_in_iter->pending_stack);
+	ftrace_clear_pending_stack(&ftrace_in_iter->pending_stack);
 	tracecmd_free_record(ftrace_in_iter->rec);
 	trace_seq_destroy(&ftrace_in_iter->seq);
 
@@ -1007,209 +725,6 @@ void ftrace_in_message_iterator_finalize(
 
 	/* Free the allocated structure */
 	free(ftrace_in_iter);
-}
-
-static int64_t convert_to_signed(uint64_t val, uint64_t bits)
-{
-	/* Compute the sign bit mask (1 << (bits‑1)). */
-	uint64_t sign_bit = UINT64_C(1) << (bits - 1);
-	/* Compute the full range mask (1 << bits) – used for two's‑complement
-	 * conversion when the sign bit is set. */
-	uint64_t full_range = UINT64_C(1) << bits;
-
-	if (val & sign_bit) {
-		/* Negative number in two's‑complement: subtract the full range. */
-		return (int64_t)(val - full_range);
-	}
-	return (int64_t)val;
-}
-
-static void
-set_message_field_value(struct ftrace_in_message_iterator *ftrace_in_iter,
-						struct tep_format_field *field, const char *field_name,
-						bt_field *data_field, const bt_field_class *data_class,
-						bt_field_class_type data_class_type, void *data,
-						int len)
-{
-	if (bt_field_class_type_is(data_class_type, BT_FIELD_CLASS_TYPE_STRING)) {
-		bt_field_string_set_value(data_field, data);
-	} else if (bt_field_class_type_is(data_class_type,
-									  BT_FIELD_CLASS_TYPE_SIGNED_INTEGER)) {
-		unsigned long long val = tep_read_number(field->event->tep, data, len);
-		int64_t typed_val = convert_to_signed(
-			val, bt_field_class_integer_get_field_value_range(data_class));
-		if (ftrace_in_iter->ftrace_in->lttng_format)
-			typed_val = lttng_get_field_val_from_event_signed(
-				field->event, field_name, typed_val);
-		bt_field_integer_signed_set_value(data_field, typed_val);
-	} else if (bt_field_class_type_is(data_class_type,
-									  BT_FIELD_CLASS_TYPE_UNSIGNED_INTEGER)) {
-		uint64_t typed_val = tep_read_number(field->event->tep, data, len);
-		if (ftrace_in_iter->ftrace_in->lttng_format)
-			typed_val = lttng_get_field_val_from_event_unsigned(
-				field->event, field_name, typed_val);
-		bt_field_integer_unsigned_set_value(data_field, typed_val);
-	}
-}
-
-static void
-set_message_common_fields(struct ftrace_in_message_iterator *ftrace_in_iter,
-						  struct tep_event *trace_event, struct tep_record *rec,
-						  bt_field *context_field)
-{
-	const bt_bool lttng = ftrace_in_iter->ftrace_in->lttng_format;
-	struct trace_seq *seq = &ftrace_in_iter->seq;
-	bt_field *data_field = NULL;
-	const char *field_name = NULL;
-
-	/* common_pid  / task */
-	field_name =
-		lttng ? lttng_get_field_name_from_event(trace_event, "common_pid") :
-				"common_pid";
-	data_field = bt_field_structure_borrow_member_field_by_name(context_field,
-																field_name);
-	const int pid = tep_data_pid(trace_event->tep, rec);
-	const char *comm = tep_data_comm_from_pid(trace_event->tep, pid);
-	bt_field_integer_signed_set_value(data_field, pid);
-	field_name = lttng ? lttng_get_field_name_from_event(trace_event, "task") :
-						 "task";
-	data_field = bt_field_structure_borrow_member_field_by_name(context_field,
-																field_name);
-	bt_field_string_set_value(data_field, comm);
-
-	/* latency */
-	data_field = bt_field_structure_borrow_member_field_by_name(context_field,
-																"latency");
-	trace_seq_reset(seq);
-	tep_print_event(trace_event->tep, seq, rec, "%s", TEP_PRINT_LATENCY);
-	trace_seq_terminate(seq);
-	bt_field_string_set_value(data_field, seq->buffer);
-
-	if (ftrace_in_iter->ftrace_in->with_callstacks) {
-		const bt_bool symbolize = ftrace_in_iter->ftrace_in->symbolize_funcs;
-		struct tep_handle *tep = trace_event->tep;
-
-		/* kernel stack */
-		field_name = lttng ? lttng_get_field_name_from_event(trace_event,
-															 "kernel_stack") :
-							 "kernel_stack";
-		bt_field *karr_field = bt_field_structure_borrow_member_field_by_name(
-			context_field, field_name);
-		const int klen = ftrace_in_iter->pending_stack.klen;
-		const uint64_t *kstack = ftrace_in_iter->pending_stack.kernel_stack;
-		bt_field_array_dynamic_set_length(karr_field, klen);
-		for (int i = 0; i < klen; i++) {
-			bt_field *elem =
-				bt_field_array_borrow_element_field_by_index(karr_field, i);
-			if (symbolize) {
-				format_func_addr(tep, seq, kstack[i]);
-				bt_field_string_set_value(elem, seq->buffer);
-			} else {
-				bt_field_integer_unsigned_set_value(elem, kstack[i]);
-			}
-		}
-
-		/* user stack */
-		field_name =
-			lttng ? lttng_get_field_name_from_event(trace_event, "user_stack") :
-					"user_stack";
-		bt_field *uarr_field = bt_field_structure_borrow_member_field_by_name(
-			context_field, field_name);
-		const int ulen = ftrace_in_iter->pending_stack.ulen;
-		const uint64_t *ustack = ftrace_in_iter->pending_stack.user_stack;
-		bt_field_array_dynamic_set_length(uarr_field, ulen);
-		for (int i = 0; i < ulen; i++) {
-			bt_field *elem =
-				bt_field_array_borrow_element_field_by_index(uarr_field, i);
-			/* take address as is, as we cannot symbolize (no userspace debug info) */
-			bt_field_integer_unsigned_set_value(elem, ustack[i]);
-		}
-	}
-
-	/* clear pending stack for next event */
-	clear_pending_stack(&ftrace_in_iter->pending_stack);
-}
-
-static void set_message_field(struct ftrace_in_message_iterator *ftrace_in_iter,
-							  struct tep_event *trace_event,
-							  struct tep_record *rec,
-							  struct tep_format_field *field,
-							  bt_field *payload_field)
-{
-	const bt_bool lttng = ftrace_in_iter->ftrace_in->lttng_format;
-	const bt_bool symbolize = ftrace_in_iter->ftrace_in->symbolize_funcs;
-	const char *field_name;
-	bt_field *data_field = NULL;
-	int len = 0;
-	uint8_t *data_raw = NULL;
-
-	if (lttng) {
-		field_name = lttng_get_field_name_from_event(trace_event, field->name);
-	} else {
-		field_name = field->name;
-	}
-
-	data_field = bt_field_structure_borrow_member_field_by_name(payload_field,
-																field_name);
-	if (!data_field) {
-		BT_FTRACE_LOG_DEBUG(ftrace_in_iter->ftrace_in->log_level,
-							"skip unknown field \"%s\" on %s:%s", field_name,
-							trace_event->system, trace_event->name);
-		return;
-	}
-
-	const bt_field_class_type data_class_type =
-		bt_field_get_class_type(data_field);
-	const bt_field_class *data_class = bt_field_borrow_class_const(data_field);
-
-	if (bt_field_class_type_is(data_class_type,
-							   BT_FIELD_CLASS_TYPE_STATIC_ARRAY)) {
-		const bt_field_class *member_class =
-			bt_field_class_array_borrow_element_field_class_const(
-				bt_field_borrow_class_const(data_field));
-		const bt_field_class_type member_class_type =
-			bt_field_class_get_type(member_class);
-		data_raw =
-			tep_get_field_raw(NULL, trace_event, field->name, rec, &len, 0);
-		const int n_items = field->arraylen;
-		const int item_size = len / n_items;
-		for (int i = 0; i < n_items; i++) {
-			bt_field *member_field =
-				bt_field_array_borrow_element_field_by_index(data_field, i);
-			set_message_field_value(ftrace_in_iter, field, field_name,
-									member_field, member_class,
-									member_class_type, &data_raw[i * item_size],
-									item_size);
-		}
-	} else if (symbolize && event_field_is_symbolic(trace_event, field->name)) {
-		event_set_symbolic_field(field->event, rec, &ftrace_in_iter->seq,
-								 data_field, field->name);
-	} else {
-		data_raw =
-			tep_get_field_raw(NULL, trace_event, field->name, rec, &len, 0);
-		set_message_field_value(ftrace_in_iter, field, field_name, data_field,
-								data_class, data_class_type, data_raw, len);
-	}
-}
-
-static void read_stack_field(struct tep_handle *tep,
-							 struct tep_event *trace_event,
-							 struct tep_record *rec, uint64_t **out_stack,
-							 int *out_len)
-{
-	int len = 0;
-	uint8_t *raw =
-		(uint8_t *)tep_get_field_raw(NULL, trace_event, "caller", rec, &len, 0);
-	int count = len / sizeof(uint64_t);
-	free(*out_stack);
-	*out_stack = malloc(count * sizeof(uint64_t));
-	for (int i = 0; i < count; i++)
-		(*out_stack)[i] =
-			tep_read_number(tep, raw + i * sizeof(uint64_t), sizeof(uint64_t));
-	/* strip trailing zero entries */
-	while (count > 0 && (*out_stack)[count - 1] == 0)
-		count--;
-	*out_len = count;
 }
 
 /*
@@ -1301,16 +816,16 @@ create_message_from_event(struct ftrace_in_message_iterator *ftrace_in_iter,
 	}
 
 	if (strcmp(trace_event->name, "kernel_stack") == 0) {
-		read_stack_field(tep, trace_event, rec,
-						 &ftrace_in_iter->pending_stack.kernel_stack,
-						 &ftrace_in_iter->pending_stack.klen);
+		ftrace_read_stack_field(tep, trace_event, rec,
+								&ftrace_in_iter->pending_stack.kernel_stack,
+								&ftrace_in_iter->pending_stack.klen);
 		goto next_record;
 	}
 
 	if (strcmp(trace_event->name, "user_stack") == 0) {
-		read_stack_field(tep, trace_event, rec,
-						 &ftrace_in_iter->pending_stack.user_stack,
-						 &ftrace_in_iter->pending_stack.ulen);
+		ftrace_read_stack_field(tep, trace_event, rec,
+								&ftrace_in_iter->pending_stack.user_stack,
+								&ftrace_in_iter->pending_stack.ulen);
 		goto next_record;
 	}
 
@@ -1332,13 +847,17 @@ create_message_from_event(struct ftrace_in_message_iterator *ftrace_in_iter,
 	bt_field *context_field = bt_event_borrow_specific_context_field(event);
 
 	/* common fields (event context) */
-	set_message_common_fields(ftrace_in_iter, trace_event, rec, context_field);
+	const struct ftrace_common_config config =
+		get_common_config(ftrace_in_iter->ftrace_in);
+	ftrace_set_message_common_fields(&config, &ftrace_in_iter->pending_stack,
+									 &ftrace_in_iter->seq, trace_event, rec,
+									 context_field);
 
 	/* specific fields */
 	fields = tep_event_fields(trace_event);
 	for (int j = 0; fields[j]; j++) {
-		set_message_field(ftrace_in_iter, trace_event, rec, fields[j],
-						  payload_field);
+		ftrace_set_message_field(&config, &ftrace_in_iter->seq, trace_event,
+								 rec, fields[j], payload_field);
 	}
 	free(fields);
 
@@ -1411,7 +930,7 @@ ftrace_in_message_iterator_seek_beginning(
 		bt_self_message_iterator_get_data(self_message_iterator);
 
 	/* cleanup current state */
-	clear_pending_stack(&ftrace_in_iter->pending_stack);
+	ftrace_clear_pending_stack(&ftrace_in_iter->pending_stack);
 	tracecmd_free_record(ftrace_in_iter->rec);
 	BT_PACKET_PUT_REF_AND_RESET(ftrace_in_iter->packet);
 
@@ -1452,7 +971,7 @@ ftrace_in_message_iterator_seek_ns_from_origin(
 	if (ftrace_in_iter->last_rec_ts < ns_from_orig_pos) {
 		while (ftrace_in_iter->rec &&
 			   ftrace_in_iter->last_rec_ts < ns_from_orig_pos) {
-			clear_pending_stack(&ftrace_in_iter->pending_stack);
+			ftrace_clear_pending_stack(&ftrace_in_iter->pending_stack);
 			tracecmd_free_record(ftrace_in_iter->rec);
 
 			ftrace_in_iter->rec =

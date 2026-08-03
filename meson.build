@@ -71,6 +71,8 @@ endif
 bt2_ftrace_plugin = shared_library('babeltrace-plugin-ftrace',
   sources: files(
     'src/bt-ftrace-logging.h',
+    'src/bt-ftrace-common.c',
+    'src/bt-ftrace-common.h',
     'src/bt-ftrace-lttng-events.c',
     'src/bt-ftrace-lttng-events.h',
     'src/bt-ftrace-plugin.c',
