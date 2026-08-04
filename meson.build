@@ -17,6 +17,7 @@ cc = meson.get_compiler('c')
 glib_dep = dependency('glib-2.0')
 json_glib_dep = dependency('json-glib-1.0')
 uuid_dep = dependency('uuid')
+tracefs_dep = dependency('libtracefs', required: false)
 traceevent_dep = dependency('libtraceevent')
 tracecmd_dep = dependency('libtracecmd')
 babeltrace2_dep = dependency('babeltrace2')
@@ -50,6 +51,7 @@ conf_data = configuration_data({
   'version_minor': project_version_parts[1],
   'version_patch': project_version_parts[2],
   'tracecmd_private_syms': get_option('tracecmd-internals').to_int(),
+  'with_live_source': get_option('with-live-source').to_int(),
   'has_bt2_clock_uid': bt2_has_clock_uid.to_int(),
   'has_bt2_clock_namespace': bt2_has_clock_namespace.to_int(),
   'has_bt2_clock_unknown': bt2_has_clock_unknown.to_int(),
@@ -63,7 +65,14 @@ configure_file(input : 'src/config.h.in',
                configuration : conf_data)
 config_inc = include_directories('.')
 
-summary({'private libtracecmd symbols (plugin)': get_option('tracecmd-internals')}, bool_yn: true, section: 'Build Configuration')
+summary(
+  {
+    'private libtracecmd symbols (plugin)': get_option('tracecmd-internals'),
+    'with source.ftrace.live': get_option('with-live-source'),
+  },
+  bool_yn: true,
+  section: 'Build Configuration',
+)
 
 # hidden symbols are supported from babeltrace 2.1 on:
 # https://github.com/efficios/babeltrace/commit/1353b066072e6c389ff35853bac83f65597e7a6a
@@ -72,42 +81,52 @@ if babeltrace2_dep.version().version_compare('>=2.1')
 else
   bt2_plugin_sym_vis = 'default'
 endif
-bt2_ftrace_plugin = shared_library('babeltrace-plugin-ftrace',
-  sources: files(
-    'src/bt-ftrace-logging.h',
-    'src/bt-ftrace-common.c',
-    'src/bt-ftrace-common.h',
-    'src/bt-ftrace-lttng-events.c',
-    'src/bt-ftrace-lttng-events.h',
-    'src/bt-ftrace-plugin.c',
-    'src/bt-ftrace-source-query.c',
-    'src/bt-ftrace-source-query.h',
-    'src/bt-ftrace-source-live-query.c',
-    'src/bt-ftrace-source-live-query.h',
+
+bt2_ftrace_plugin_srcs = files(
+  'src/bt-ftrace-logging.h',
+  'src/bt-ftrace-common.c',
+  'src/bt-ftrace-common.h',
+  'src/bt-ftrace-lttng-events.c',
+  'src/bt-ftrace-lttng-events.h',
+  'src/bt-ftrace-plugin.c',
+  'src/bt-ftrace-source-query.c',
+  'src/bt-ftrace-source-query.h',
+  'src/bt-ftrace-source.c',
+  'src/bt-ftrace-source.h',
+  'src/bt-ftrace-sym-field.h',
+  'src/bt-ftrace-sym-field.c',
+  'src/bt-ftrace-tracemeta.c',
+  'src/bt-ftrace-tracemeta.h',
+  'src/bt-ftrace-utils.h'
+)
+bt2_ftrace_plugin_deps = [
+  tracecmd_dep,
+  traceevent_dep,
+  babeltrace2_dep,
+  glib_dep,
+  json_glib_dep,
+  uuid_dep
+]
+
+if get_option('with-live-source')
+  bt2_ftrace_plugin_srcs += files(
     'src/bt-ftrace-source-live.c',
     'src/bt-ftrace-source-live.h',
-    'src/bt-ftrace-source.c',
-    'src/bt-ftrace-source.h',
-    'src/bt-ftrace-sym-field.h',
-    'src/bt-ftrace-sym-field.c',
-    'src/bt-ftrace-tracemeta.c',
-    'src/bt-ftrace-tracemeta.h',
-    'src/bt-ftrace-utils.h',
-    ),
+    'src/bt-ftrace-source-live-query.c',
+    'src/bt-ftrace-source-live-query.h'
+  )
+  bt2_ftrace_plugin_deps += tracefs_dep
+endif
+
+bt2_ftrace_plugin = shared_library('babeltrace-plugin-ftrace',
+  sources: bt2_ftrace_plugin_srcs,
   c_args: ['-Wno-unused-parameter'],
   gnu_symbol_visibility: bt2_plugin_sym_vis,
   include_directories: config_inc,
   name_prefix: '',
   install_dir: get_option('libdir') / 'babeltrace2/plugins',
   install: true,
-  dependencies: [
-    tracecmd_dep,
-    traceevent_dep,
-    babeltrace2_dep,
-    glib_dep,
-    json_glib_dep,
-    uuid_dep
-  ]
+  dependencies: bt2_ftrace_plugin_deps
 )
 
 executable('ftrace-to-ctf',
