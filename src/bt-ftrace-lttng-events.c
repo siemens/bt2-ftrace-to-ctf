@@ -74,7 +74,8 @@ const char *lttng_get_event_name_from_event(const struct tep_event *event)
 	} else if (event_system_is("console", event) &&
 			   !event_has_prefix("console_", event)) {
 		return event_prefix_name("console_", event);
-	} else if (event_system_is("syscalls", event) || event_system_is("raw_syscalls", event)) {
+	} else if (event_system_is("syscalls", event) ||
+			   event_system_is("raw_syscalls", event)) {
 		return event_syscall_prefix_name(event);
 	}
 	return event->name;
