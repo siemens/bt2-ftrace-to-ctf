@@ -5,7 +5,11 @@
  * The tracemeta sink emits per-stream clock metadata in json-lines format that
  * can be used to sync the clocks of multiple traces. The format is as following:
  * {
- *   trace: { (uid: str | uuid: str)? },
+ *   trace: {
+ *     name: str,
+ *     (namespace: str)?,
+ *     (uid: str | uuid: str)?
+ *   },
  *   stream: {
  *     id: int,
  *     name: str,
@@ -139,6 +143,15 @@ static void emit_metadata_json(struct tracemeta_out *cm_out,
 	json_builder_set_member_name(builder, "trace");
 	json_builder_begin_object(builder);
 
+	json_builder_set_member_name(builder, "name");
+	const char *trace_name = bt_trace_get_name(trace);
+	json_builder_add_string_value(builder, trace_name ? trace_name : "");
+#if HAS_BT2_TRACE_NAMESPACE
+	json_builder_set_member_name(builder, "namespace");
+	const char *trace_namespace = bt_trace_get_namespace(trace);
+	json_builder_add_string_value(builder,
+								  trace_namespace ? trace_namespace : "");
+#endif
 	if (cm_out->mip_version == 0) {
 		trace_uuid = bt_trace_get_uuid(trace);
 		if (trace_uuid) {
@@ -150,7 +163,7 @@ static void emit_metadata_json(struct tracemeta_out *cm_out,
 #if HAS_BT2_TRACE_UID
 		const char *trace_uid = bt_trace_get_uid(trace);
 		json_builder_set_member_name(builder, "uid");
-		json_builder_add_string_value(builder, trace_uid);
+		json_builder_add_string_value(builder, trace_uid ? trace_uid : "");
 #endif
 	}
 	json_builder_end_object(builder);

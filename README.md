@@ -91,7 +91,12 @@ whereby each object is as following:
 
 ```
 {
-  trace: { (uid: str | uuid: str)? },
+  trace: {
+    id: int,
+    name: str,
+    (namespace: str)?,
+    (uid: str | uuid: str)?
+  },
   stream: {
     id: int,
     name: str,
