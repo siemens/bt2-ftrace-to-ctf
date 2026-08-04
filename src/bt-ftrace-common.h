@@ -9,6 +9,7 @@
 #include <babeltrace2/babeltrace.h>
 #include <event-parse.h>
 #include <glib.h>
+#include <uuid.h>
 
 #define FTRACE_CLOCK_UUID_NAMESPACE                     \
 	{                                                   \
@@ -49,8 +50,22 @@ struct ftrace_common_options {
 	char *trace_creation_datetime;
 };
 
+struct ftrace_trace_identity {
+	const char *namespace;
+	const char *name;
+	const char *uid;
+};
+
 void ftrace_parse_common_params(const bt_value *params,
 								struct ftrace_common_options *options);
+
+void ftrace_common_opts_free(struct ftrace_common_options *options);
+
+char *ftrace_format_port_name(const struct ftrace_trace_identity *identity,
+							  uint64_t stream_class_id, uint64_t stream_id,
+							  const char *fallback_path);
+
+void ftrace_derive_trace_uid(uint64_t trace_id, char uid[UUID_STR_LEN]);
 
 bt_event_class *
 ftrace_create_event_class(bt_stream_class *stream_class,

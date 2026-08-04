@@ -11,8 +11,10 @@
 #include <trace-cmd.h>
 #include <event-parse.h>
 #include <babeltrace2/babeltrace.h>
+#include <uuid.h>
 
 #include "config.h"
+#include "bt-ftrace-common.h"
 #include "bt-ftrace-source-query.h"
 
 /*
@@ -60,9 +62,10 @@ static int get_last_record_ts_clbk(struct tracecmd_input *tc_input,
 #endif
 
 static void append_stream_infos(struct tracecmd_input *tc_input,
-								const char *buffer_name, bt_value *infos)
+								int buffer_index,
+								const struct ftrace_trace_identity *identity,
+								const char *path, bt_value *infos)
 {
-	char NAME_BUF[32];
 	bt_value *streaminfo, *range;
 	struct tep_record *rec = NULL;
 	const uint64_t ts_begin = tracecmd_get_first_ts(tc_input);
@@ -76,13 +79,11 @@ static void append_stream_infos(struct tracecmd_input *tc_input,
 			continue;
 		tracecmd_free_record(rec);
 
-		if (buffer_name) {
-			snprintf(NAME_BUF, sizeof(NAME_BUF), "out-%s%d", buffer_name, i);
-		} else {
-			snprintf(NAME_BUF, sizeof(NAME_BUF), "out%d", i);
-		}
+		const uint64_t stream_id = ((uint64_t)buffer_index << 32) | i;
+		char *port_name = ftrace_format_port_name(identity, 0, stream_id, path);
 		bt_value_array_append_empty_map_element(infos, &streaminfo);
-		bt_value_map_insert_string_entry(streaminfo, "port-name", NAME_BUF);
+		bt_value_map_insert_string_entry(streaminfo, "port-name", port_name);
+		g_free(port_name);
 		bt_value_map_insert_empty_map_entry(streaminfo, "range-ns", &range);
 		bt_value_map_insert_signed_integer_entry(range, "begin",
 												 (int64_t)ts_begin);
@@ -139,22 +140,32 @@ ftrace_query_trace_infos(bt_self_component_class_source *self_component_class,
 	bt_value *response = bt_value_array_create();
 	bt_value *trace_info;
 	bt_value *infos;
+	struct ftrace_common_options options = { 0 };
+	char trace_uid[UUID_STR_LEN] = { 0 };
+	const unsigned long long traceid = tracecmd_get_traceid(tc_main);
+	ftrace_derive_trace_uid(traceid, trace_uid);
+	ftrace_parse_common_params(params, &options);
+	const struct ftrace_trace_identity identity = {
+		.namespace = FTRACE_NAMESPACE,
+		.name = options.trace_name ? options.trace_name : "",
+		.uid = trace_uid,
+	};
 	bt_value_array_append_empty_map_element(response, &trace_info);
 	bt_value_map_insert_empty_array_entry(trace_info, "stream-infos", &infos);
 
 	/* main buffer */
-	append_stream_infos(tc_main, NULL, infos);
+	append_stream_infos(tc_main, 0, &identity, path, infos);
 
 	int nsubbuf = tracecmd_buffer_instances(tc_main);
 	for (int i = 0; i < nsubbuf; ++i) {
 		struct tracecmd_input *tc_sub =
 			tracecmd_buffer_instance_handle(tc_main, i);
-		const char *buf_name = tracecmd_buffer_instance_name(tc_main, i);
-		append_stream_infos(tc_sub, buf_name, infos);
+		append_stream_infos(tc_sub, i + 1, &identity, path, infos);
 		tracecmd_close(tc_sub);
 	}
 
 	tracecmd_close(tc_main);
+	ftrace_common_opts_free(&options);
 	*result = response;
 	return BT_COMPONENT_CLASS_QUERY_METHOD_STATUS_OK;
 }

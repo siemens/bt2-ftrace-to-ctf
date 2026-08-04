@@ -10,6 +10,7 @@
 #include "bt-ftrace-sym-field.h"
 #include "bt-ftrace-utils.h"
 
+#include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
 #include <uuid.h>
@@ -51,6 +52,38 @@ void ftrace_parse_common_params(const bt_value *params,
 		options->trace_creation_datetime = strdup(bt_value_string_get(value));
 }
 
+void ftrace_common_opts_free(struct ftrace_common_options *options)
+{
+	free(options->clock_uid);
+	free(options->clock_namespace);
+	free(options->clock_name);
+	free(options->trace_name);
+	free(options->trace_creation_datetime);
+	memset(options, 0, sizeof(*options));
+}
+
+char *ftrace_format_port_name(const struct ftrace_trace_identity *identity,
+							  uint64_t stream_class_id, uint64_t stream_id,
+							  const char *fallback_path)
+{
+	if (identity && identity->namespace && identity->name && identity->uid) {
+		return g_strdup_printf(
+			"{namespace: `%s`, name: `%s`, uid: `%s`} | %" PRIu64 " | %" PRIu64,
+			identity->namespace, identity->name, identity->uid, stream_class_id,
+			stream_id);
+	}
+	return g_strdup_printf("%s | %" PRIu64 " | %" PRIu64, fallback_path,
+						   stream_class_id, stream_id);
+}
+void ftrace_derive_trace_uid(uint64_t trace_id, char uid[UUID_STR_LEN])
+{
+	static const uuid_t trace_namespace = FTRACE_TRACE_UUID_NAMESPACE;
+	uuid_t trace_uuid;
+
+	uuid_generate_md5(trace_uuid, trace_namespace, (const char *)&trace_id,
+					  sizeof(trace_id));
+	uuid_unparse(trace_uuid, uid);
+}
 static bt_field_class *
 create_event_field_class(bt_trace_class *trace_class,
 						 const struct tep_format_field *field,
@@ -235,7 +268,10 @@ bt_stream_class *ftrace_create_stream_class(bt_trace_class *trace_class,
 											bt_clock_class *clock_class,
 											bt_bool supports_packets)
 {
-	bt_stream_class *stream_class = bt_stream_class_create(trace_class);
+	bt_trace_class_set_assigns_automatic_stream_class_id(trace_class, BT_FALSE);
+	bt_stream_class *stream_class =
+		bt_stream_class_create_with_id(trace_class, 0);
+	bt_stream_class_set_assigns_automatic_stream_id(stream_class, BT_FALSE);
 
 	bt_stream_class_set_name(stream_class, "ftrace-stream");
 	bt_stream_class_set_default_clock_class(stream_class, clock_class);
