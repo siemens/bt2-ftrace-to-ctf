@@ -79,8 +79,9 @@ static void append_stream_infos(struct tracecmd_input *tc_input,
 			continue;
 		tracecmd_free_record(rec);
 
-		const uint64_t stream_id = ((uint64_t)buffer_index << 32) | i;
-		char *port_name = ftrace_format_port_name(identity, 0, stream_id, path);
+		const uint64_t stream_id = i;
+		char *port_name =
+			ftrace_format_port_name(identity, buffer_index, stream_id, path);
 		bt_value_array_append_empty_map_element(infos, &streaminfo);
 		bt_value_map_insert_string_entry(streaminfo, "port-name", port_name);
 		g_free(port_name);
