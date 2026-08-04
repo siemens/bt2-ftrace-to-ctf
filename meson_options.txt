@@ -4,3 +4,8 @@ option('tracecmd-internals',
        description: 'Enable code that depends on private libtracecmd symbols',
        type: 'boolean',
        value: false)
+
+option('with-live-source',
+       description: 'Enable live source reading (requires tracefs 1.8.0 or later)',
+       type: 'boolean',
+       value: true)

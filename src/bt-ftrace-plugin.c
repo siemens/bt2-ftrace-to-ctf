@@ -8,11 +8,14 @@
 
 #include <babeltrace2/babeltrace.h>
 
+#include "config.h"
 #include "bt-ftrace-source.h"
 #include "bt-ftrace-source-query.h"
+#include "bt-ftrace-tracemeta.h"
+#if WITH_LIVE_SOURCE
 #include "bt-ftrace-source-live.h"
 #include "bt-ftrace-source-live-query.h"
-#include "bt-ftrace-tracemeta.h"
+#endif
 
 /* Mandatory */
 BT_PLUGIN_MODULE()
@@ -50,6 +53,7 @@ BT_PLUGIN_SOURCE_COMPONENT_CLASS_GET_SUPPORTED_MIP_VERSIONS_METHOD(
 	tracedat, ftrace_get_supported_mip_versions);
 BT_PLUGIN_SOURCE_COMPONENT_CLASS_QUERY_METHOD(tracedat, ftrace_query_method);
 
+#if WITH_LIVE_SOURCE
 /* Define the `live` source component class */
 BT_PLUGIN_SOURCE_COMPONENT_CLASS(live, ftrace_live_message_iterator_next);
 BT_PLUGIN_SOURCE_COMPONENT_CLASS_DESCRIPTION(
@@ -64,6 +68,7 @@ BT_PLUGIN_SOURCE_COMPONENT_CLASS_MESSAGE_ITERATOR_CLASS_FINALIZE_METHOD(
 BT_PLUGIN_SOURCE_COMPONENT_CLASS_GET_SUPPORTED_MIP_VERSIONS_METHOD(
 	live, ftrace_live_get_supported_mip_versions);
 BT_PLUGIN_SOURCE_COMPONENT_CLASS_QUERY_METHOD(live, ftrace_live_query_method);
+#endif /* WITH_LIVE_SOURCE */
 
 /* Define the `tracemeta` sink component class */
 BT_PLUGIN_SINK_COMPONENT_CLASS(tracemeta, tracemeta_out_consume);
