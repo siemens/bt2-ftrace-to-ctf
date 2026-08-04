@@ -74,7 +74,8 @@ ftrace_create_event_class(bt_stream_class *stream_class,
 
 bt_stream_class *ftrace_create_stream_class(bt_trace_class *trace_class,
 											bt_clock_class *clock_class,
-											bt_bool supports_packets);
+											bt_bool supports_packets,
+											uint64_t stream_class_id);
 
 GHashTable *
 ftrace_create_event_classes(struct tep_handle *tep,

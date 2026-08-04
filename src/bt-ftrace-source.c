@@ -69,6 +69,9 @@ struct port_in {
 	/* weak reference */
 	struct tracecmd_input *tc_input;
 
+	/* Event classes of the owning buffer (weak reference) */
+	GHashTable *event_classes;
+
 	/* Stream (owned by this) */
 	bt_stream *stream;
 };
@@ -77,6 +80,10 @@ struct tc_buffer {
 	struct tracecmd_input *tc_input;
 	struct port_in *ports;
 	unsigned int nb_ports;
+
+	/* Per-buffer stream class and event classes (owned by this) */
+	bt_stream_class *stream_class;
+	GHashTable *event_classes;
 };
 
 /* Source component's private data */
@@ -101,11 +108,13 @@ struct ftrace_in {
 	int tracer_version_major;
 	int tracer_version_minor;
 
-	/* Event classes for each type of event (owned by this) */
-	GHashTable *event_classes;
-
-	/* we only have a single stream class (as event classes are per system) */
-	bt_stream_class *stream_class;
+	/*
+	 * Trace class and clock class shared by all per-buffer stream classes.
+	 * Kept as (owning) references from metadata creation until all buffers
+	 * had their stream classes created.
+	 */
+	bt_trace_class *trace_class;
+	bt_clock_class *clock_class;
 
 	bt_trace *trace;
 	/* backing storage for trace_identity.uid, which outlives setup */
@@ -241,14 +250,12 @@ static void create_metadata_and_trace(bt_self_component *self_component,
 	 * Any event message created for such a stream has a snapshot of the
 	 * stream's default clock.
 	 */
-	bt_stream_class *stream_class =
-		ftrace_create_stream_class(trace_class, clock_class, USE_PACKAGES);
-
-	struct tep_handle *tep =
-		tracecmd_get_tep(ftrace_in->tc_buffers[0].tc_input);
+	/*
+	 * Each trace-cmd buffer instance becomes its own stream class with its
+	 * own event classes (see setup_ports_for_trace_buffer). Keep the trace
+	 * and clock class around so they can be created lazily per buffer.
+	 */
 	const struct ftrace_common_config config = get_common_config(ftrace_in);
-	ftrace_in->event_classes =
-		ftrace_create_event_classes(tep, stream_class, &config);
 
 	/* Create a default trace from (instance of `trace_class`) */
 	bt_trace *trace = bt_trace_create(trace_class);
@@ -290,10 +297,12 @@ static void create_metadata_and_trace(bt_self_component *self_component,
 								 ftrace_in->tracer_version_minor);
 
 	ftrace_in->trace = trace;
-	ftrace_in->stream_class = stream_class;
-
-	bt_clock_class_put_ref(clock_class);
-	bt_trace_class_put_ref(trace_class);
+	/*
+	 * Keep owning references to the trace and clock class so each buffer can
+	 * create its own stream class. They are released in ftrace_in_free.
+	 */
+	ftrace_in->trace_class = trace_class;
+	ftrace_in->clock_class = clock_class;
 }
 
 static int
@@ -308,6 +317,22 @@ setup_ports_for_trace_buffer(struct ftrace_in *ftrace_in,
 					   "the trace of buffer \"%s\"has %d CPUs", buffer_name,
 					   ncpus);
 
+	/*
+	 * Model each trace-cmd buffer instance as its own stream class: the
+	 * instances may carry a different event set, so event classes must be
+	 * resolved per buffer. The stream class id is the buffer index. The main
+	 * buffer has no name; named instances use their trace-cmd name.
+	 */
+	const struct ftrace_common_config config = get_common_config(ftrace_in);
+	tc_buffer->stream_class = ftrace_create_stream_class(ftrace_in->trace_class,
+														 ftrace_in->clock_class,
+														 USE_PACKAGES,
+														 buffer_index);
+	if (buffer_name)
+		bt_stream_class_set_name(tc_buffer->stream_class, buffer_name);
+	tc_buffer->event_classes =
+		ftrace_create_event_classes(tep, tc_buffer->stream_class, &config);
+
 	/* Add one output port per CPU stream */
 	tc_buffer->ports = calloc(ncpus, sizeof(struct port_in));
 	tc_buffer->nb_ports = ncpus;
@@ -315,6 +340,7 @@ setup_ports_for_trace_buffer(struct ftrace_in *ftrace_in,
 		struct port_in *pd = &tc_buffer->ports[i];
 		pd->cpu_id = i;
 		pd->tc_input = tc_buffer->tc_input;
+		pd->event_classes = tc_buffer->event_classes;
 
 		/* if this stream is empty, do not create a port */
 		struct tep_record *rec =
@@ -324,7 +350,7 @@ setup_ports_for_trace_buffer(struct ftrace_in *ftrace_in,
 		tracecmd_free_record(rec);
 
 		const uint64_t stream_id = ((uint64_t)buffer_index << 32) | pd->cpu_id;
-		pd->stream = bt_stream_create_with_id(ftrace_in->stream_class,
+		pd->stream = bt_stream_create_with_id(tc_buffer->stream_class,
 											  ftrace_in->trace, stream_id);
 		char *stream_name = ftrace_format_port_name(
 			&ftrace_in->trace_identity, 0, stream_id, ftrace_in->tracedat_path);
@@ -342,6 +368,8 @@ setup_ports_for_trace_buffer(struct ftrace_in *ftrace_in,
  */
 static void ftrace_in_free(struct ftrace_in *ftrace_in)
 {
+	BT_TRACE_CLASS_PUT_REF_AND_RESET(ftrace_in->trace_class);
+	BT_CLOCK_CLASS_PUT_REF_AND_RESET(ftrace_in->clock_class);
 	free(ftrace_in->tc_buffers);
 	free(ftrace_in->tracedat_path);
 	ftrace_common_opts_free(&ftrace_in->options);
@@ -445,8 +473,6 @@ void ftrace_in_finalize(bt_self_component_source *self_component_source)
 		bt_self_component_source_as_self_component(self_component_source));
 
 	/* Put all references */
-	g_hash_table_unref(ftrace_in->event_classes);
-	BT_STREAM_CLASS_PUT_REF_AND_RESET(ftrace_in->stream_class);
 	BT_TRACE_PUT_REF_AND_RESET(ftrace_in->trace);
 
 	/* Free the per buffer data */
@@ -456,6 +482,9 @@ void ftrace_in_finalize(bt_self_component_source *self_component_source)
 			BT_STREAM_PUT_REF_AND_RESET(buffer->ports[j].stream);
 		}
 		free(buffer->ports);
+		if (buffer->event_classes)
+			g_hash_table_unref(buffer->event_classes);
+		BT_STREAM_CLASS_PUT_REF_AND_RESET(buffer->stream_class);
 		tracecmd_close(buffer->tc_input);
 	}
 	ftrace_in_free(ftrace_in);
@@ -665,7 +694,7 @@ create_message_from_event(struct ftrace_in_message_iterator *ftrace_in_iter,
 	}
 
 	struct bt_event_class *event_class =
-		g_hash_table_lookup(ftrace_in_iter->ftrace_in->event_classes,
+		g_hash_table_lookup(ftrace_in_iter->port_data->event_classes,
 							(gconstpointer)((uintptr_t)trace_event->id));
 
 	if (supports_packets) {
