@@ -117,7 +117,9 @@ jobs:
       - name: smoke test ftrace-to-ctf
         env:
           BABELTRACE_PLUGIN_PATH: ${{ github.workspace }}/build
-        run: ./build/ftrace-to-ctf --lttng trace.dat /tmp
+        run: |
+          ./build/ftrace-to-ctf --ctf-version 2 --lttng trace.dat /tmp
+          ./build/ftrace-to-ctf --ctf-version 1.8 --lttng trace.dat /tmp
 
   generate-trace-data:
     runs-on: ubuntu-24.04
