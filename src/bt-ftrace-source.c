@@ -108,6 +108,9 @@ struct ftrace_in {
 	bt_stream_class *stream_class;
 
 	bt_trace *trace;
+	/* backing storage for trace_identity.uid, which outlives setup */
+	char trace_uid[UUID_STR_LEN];
+	struct ftrace_trace_identity trace_identity;
 
 	/* mip version of the processing graph */
 	uint64_t mip_version;
@@ -251,20 +254,27 @@ static void create_metadata_and_trace(bt_self_component *self_component,
 	bt_trace *trace = bt_trace_create(trace_class);
 
 	/* Derive a unique, stable trace UID from the trace-cmd trace id */
-	static const uuid_t trace_namespace = FTRACE_TRACE_UUID_NAMESPACE;
 	const unsigned long long traceid = tracecmd_get_traceid(tc_main);
 	uuid_t trace_uuid;
-	char trace_uid[UUID_STR_LEN];
-	uuid_generate_md5(trace_uuid, trace_namespace, (const char *)&traceid,
-					  sizeof(traceid));
-	uuid_unparse(trace_uuid, trace_uid);
+	char *trace_uid = ftrace_in->trace_uid;
+	ftrace_derive_trace_uid(traceid, trace_uid);
+	uuid_parse(trace_uid, trace_uuid);
 	if (mip_version == 0) {
 		bt_trace_set_uuid(trace, trace_uuid);
 	} else {
 #if HAS_BT2_TRACE_UID
 		bt_trace_set_uid(trace, trace_uid);
 #endif
+#if HAS_BT2_TRACE_NAMESPACE
+		bt_trace_set_namespace(trace, FTRACE_NAMESPACE);
+#endif
 	}
+	ftrace_in->trace_identity = (struct ftrace_trace_identity){
+		.namespace = FTRACE_NAMESPACE,
+		.name = ftrace_in->options.trace_name ? ftrace_in->options.trace_name :
+												"",
+		.uid = trace_uid,
+	};
 	if (!ftrace_in->options.config.lttng_format) {
 		snprintf(NAME_BUF, sizeof(NAME_BUF), "0x%llx", traceid);
 		bt_trace_set_environment_entry_string(trace, "tracecmd_traceid",
@@ -292,8 +302,6 @@ setup_ports_for_trace_buffer(struct ftrace_in *ftrace_in,
 							 struct tc_buffer *tc_buffer,
 							 const char *buffer_name, int buffer_index)
 {
-	char NAME_BUF[32];
-
 	struct tep_handle *tep = tracecmd_get_tep(tc_buffer->tc_input);
 	const int ncpus = tep_get_cpus(tep);
 	BT_FTRACE_LOG_INFO(ftrace_in->log_level,
@@ -315,22 +323,15 @@ setup_ports_for_trace_buffer(struct ftrace_in *ftrace_in,
 			continue;
 		tracecmd_free_record(rec);
 
-		/* create stream, named "<trace-file>:channel<buffer>_<cpu>" */
-		pd->stream =
-			bt_stream_create(ftrace_in->stream_class, ftrace_in->trace);
-		char *stream_name = g_strdup_printf("%s:channel%d_%d",
-											ftrace_in->tracedat_path,
-											buffer_index, pd->cpu_id);
+		const uint64_t stream_id = ((uint64_t)buffer_index << 32) | pd->cpu_id;
+		pd->stream = bt_stream_create_with_id(ftrace_in->stream_class,
+											  ftrace_in->trace, stream_id);
+		char *stream_name = ftrace_format_port_name(
+			&ftrace_in->trace_identity, 0, stream_id, ftrace_in->tracedat_path);
 		bt_stream_set_name(pd->stream, stream_name);
-		g_free(stream_name);
-
-		if (buffer_name) {
-			snprintf(NAME_BUF, sizeof(NAME_BUF), "out-%s%d", buffer_name, i);
-		} else {
-			snprintf(NAME_BUF, sizeof(NAME_BUF), "out%d", i);
-		}
 		bt_self_component_source_add_output_port(self_component_source,
-												 NAME_BUF, pd, NULL);
+												 stream_name, pd, NULL);
+		g_free(stream_name);
 	}
 
 	return 0;
