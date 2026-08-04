@@ -19,9 +19,29 @@
 #include <sys/utsname.h>
 #include <uuid.h>
 
+struct ftrace_live_buffer;
+
 struct ftrace_live_port {
 	int cpu_id;
 	bt_stream *stream;
+	/* owning buffer (weak reference) */
+	struct ftrace_live_buffer *buffer;
+};
+
+/*
+ * A live buffer is a tracefs tracing directory: either the top-level one or an
+ * instance under instances/<name>. Each has its own event set (tep) and thus
+ * its own stream class and event classes, mirroring the trace.dat source.
+ */
+struct ftrace_live_buffer {
+	struct tracefs_instance *instance;
+	char *tracing_dir;
+	struct tep_handle *tep;
+	char *name; /* NULL for the top-level buffer */
+	bt_stream_class *stream_class;
+	GHashTable *event_classes;
+	struct ftrace_live_port *ports;
+	unsigned int nb_ports;
 };
 
 enum ftrace_live_iterator_state {
@@ -50,18 +70,17 @@ struct ftrace_live_iterator {
 
 struct ftrace_live {
 	bt_logging_level log_level;
-	struct tracefs_instance *instance;
-	struct tep_handle *tep;
-	char *tracing_dir;
 	char *clock_name;
 	char trace_uid[UUID_STR_LEN];
 	struct utsname system_info;
 	struct ftrace_common_options options;
-	GHashTable *event_classes;
-	bt_stream_class *stream_class;
 	bt_trace *trace;
-	struct ftrace_live_port *ports;
-	unsigned int nb_ports;
+	/* the top-level buffer instance, used to read the common clock */
+	struct tracefs_instance *root_instance;
+	char *root_tracing_dir;
+	/* one entry per tracing directory (top-level and instances) */
+	struct ftrace_live_buffer *buffers;
+	unsigned int nb_buffers;
 };
 
 static bt_message *
@@ -69,6 +88,7 @@ create_live_message(struct ftrace_live_iterator *iterator,
 					bt_self_message_iterator *self_message_iterator)
 {
 	bt_stream *stream = iterator->port->stream;
+	struct tep_handle *tep = iterator->port->buffer->tep;
 	struct tep_event *trace_event;
 	struct tep_format_field **fields;
 	bt_message *message;
@@ -116,8 +136,7 @@ create_live_message(struct ftrace_live_iterator *iterator,
 		return bt_message_packet_beginning_create_with_default_clock_snapshot(
 			self_message_iterator, iterator->packet, iterator->record.ts);
 	}
-	trace_event =
-		tep_find_event_by_record(iterator->live->tep, &iterator->record);
+	trace_event = tep_find_event_by_record(tep, &iterator->record);
 	if (!trace_event) {
 		BT_FTRACE_LOG_WARNING(iterator->live->log_level,
 							  "skip unknown live ftrace event on CPU %d",
@@ -127,8 +146,7 @@ create_live_message(struct ftrace_live_iterator *iterator,
 		return NULL;
 	}
 	if (strcmp(trace_event->name, "kernel_stack") == 0) {
-		ftrace_read_stack_field(iterator->live->tep, trace_event,
-								&iterator->record,
+		ftrace_read_stack_field(tep, trace_event, &iterator->record,
 								&iterator->pending_stack.kernel_stack,
 								&iterator->pending_stack.klen);
 		iterator->record_ready = false;
@@ -136,8 +154,7 @@ create_live_message(struct ftrace_live_iterator *iterator,
 		return NULL;
 	}
 	if (strcmp(trace_event->name, "user_stack") == 0) {
-		ftrace_read_stack_field(iterator->live->tep, trace_event,
-								&iterator->record,
+		ftrace_read_stack_field(tep, trace_event, &iterator->record,
 								&iterator->pending_stack.user_stack,
 								&iterator->pending_stack.ulen);
 		iterator->record_ready = false;
@@ -145,7 +162,7 @@ create_live_message(struct ftrace_live_iterator *iterator,
 		return NULL;
 	}
 	bt_event_class *event_class =
-		g_hash_table_lookup(iterator->live->event_classes,
+		g_hash_table_lookup(iterator->port->buffer->event_classes,
 							(gconstpointer)(uintptr_t)trace_event->id);
 	if (!event_class) {
 		iterator->record_ready = false;
@@ -239,20 +256,30 @@ static bool flush_live_record(struct ftrace_live_iterator *iterator)
 	return read_live_buffer(iterator);
 }
 
+static void ftrace_live_buffer_fini(struct ftrace_live_buffer *buffer)
+{
+	tep_free(buffer->tep);
+	tracefs_instance_free(buffer->instance);
+	if (buffer->event_classes)
+		g_hash_table_unref(buffer->event_classes);
+	BT_STREAM_CLASS_PUT_REF_AND_RESET(buffer->stream_class);
+	for (unsigned int i = 0; i < buffer->nb_ports; i++)
+		BT_STREAM_PUT_REF_AND_RESET(buffer->ports[i].stream);
+	free(buffer->ports);
+	free(buffer->tracing_dir);
+	free(buffer->name);
+}
+
 static void ftrace_live_free(struct ftrace_live *live)
 {
 	if (!live)
 		return;
-	tep_free(live->tep);
-	tracefs_instance_free(live->instance);
-	if (live->event_classes)
-		g_hash_table_unref(live->event_classes);
-	BT_STREAM_CLASS_PUT_REF_AND_RESET(live->stream_class);
+	for (unsigned int i = 0; i < live->nb_buffers; i++)
+		ftrace_live_buffer_fini(&live->buffers[i]);
+	free(live->buffers);
 	BT_TRACE_PUT_REF_AND_RESET(live->trace);
-	for (unsigned int i = 0; i < live->nb_ports; i++)
-		BT_STREAM_PUT_REF_AND_RESET(live->ports[i].stream);
-	free(live->ports);
-	free(live->tracing_dir);
+	tracefs_instance_free(live->root_instance);
+	free(live->root_tracing_dir);
 	free(live->clock_name);
 	ftrace_common_opts_free(&live->options);
 	free(live);
@@ -348,6 +375,131 @@ static bool ftrace_live_set_creation_datetime(struct ftrace_live *live)
 	g_free(formatted);
 	return live->options.trace_creation_datetime != NULL;
 }
+/*
+ * Append a buffer for the given tracefs instance (which the buffer takes
+ * ownership of) and its tracing directory. `name` is NULL for the top-level
+ * buffer or the instance name otherwise (ownership transferred).
+ * Returns 0 on success, -1 on error (the instance is freed on error).
+ */
+static int ftrace_live_add_buffer(struct ftrace_live *live,
+								  struct tracefs_instance *instance,
+								  const char *tracing_dir, char *name)
+{
+	struct ftrace_live_buffer *buffers;
+	struct ftrace_live_buffer *buffer;
+	struct tep_handle *tep;
+
+	tep = tracefs_local_events(tracing_dir);
+	if (!tep || tracefs_load_headers(tracing_dir, tep) < 0) {
+		BT_FTRACE_LOG_ERROR(live->log_level,
+							"cannot load tracefs metadata from %s",
+							tracing_dir);
+		tep_free(tep);
+		tracefs_instance_free(instance);
+		free(name);
+		return -1;
+	}
+	buffers =
+		realloc(live->buffers, (live->nb_buffers + 1) * sizeof(*live->buffers));
+	if (!buffers) {
+		tep_free(tep);
+		tracefs_instance_free(instance);
+		free(name);
+		return -1;
+	}
+	live->buffers = buffers;
+	buffer = &live->buffers[live->nb_buffers];
+	memset(buffer, 0, sizeof(*buffer));
+	buffer->instance = instance;
+	buffer->tracing_dir = strdup(tracing_dir);
+	buffer->tep = tep;
+	buffer->name = name;
+	live->nb_buffers++;
+	return 0;
+}
+
+/*
+ * Discover the buffer instances under <tracing_dir>/instances and add a buffer
+ * for each. A missing or empty instances directory is not an error.
+ */
+static int ftrace_live_add_instances(struct ftrace_live *live,
+									 const char *tracing_dir)
+{
+	char *instances_dir = g_build_filename(tracing_dir, "instances", NULL);
+	GDir *dir = g_dir_open(instances_dir, 0, NULL);
+	const char *name;
+	int ret = 0;
+
+	if (!dir) {
+		g_free(instances_dir);
+		return 0;
+	}
+	while ((name = g_dir_read_name(dir))) {
+		char *instance_dir = g_build_filename(instances_dir, name, NULL);
+		struct tracefs_instance *instance;
+
+		if (!g_file_test(instance_dir, G_FILE_TEST_IS_DIR)) {
+			g_free(instance_dir);
+			continue;
+		}
+		instance = tracefs_instance_alloc(tracing_dir, name);
+		if (!instance) {
+			BT_FTRACE_LOG_WARNING(live->log_level,
+								  "cannot open tracefs instance %s", name);
+			g_free(instance_dir);
+			continue;
+		}
+		ret =
+			ftrace_live_add_buffer(live, instance, instance_dir, strdup(name));
+		g_free(instance_dir);
+		if (ret < 0)
+			break;
+	}
+	g_dir_close(dir);
+	g_free(instances_dir);
+	return ret;
+}
+
+static void setup_ports_for_live_buffer(
+	bt_self_component_source *self_component_source, struct ftrace_live *live,
+	struct ftrace_live_buffer *buffer, bt_trace_class *trace_class,
+	bt_clock_class *clock_class, unsigned int buffer_index)
+{
+	const int ncpus = tep_get_cpus(buffer->tep);
+
+	/*
+	 * Each buffer instance is its own stream class with its own event set.
+	 * The top-level buffer has no name; instances use their tracefs name.
+	 */
+	buffer->stream_class = ftrace_create_stream_class(
+		trace_class, clock_class, BT_TRUE, buffer_index, live->trace_uid,
+		live->options.config.lttng_format);
+	if (buffer->name)
+		bt_stream_class_set_name(buffer->stream_class, buffer->name);
+	buffer->event_classes = ftrace_create_event_classes(
+		buffer->tep, buffer->stream_class, &live->options.config);
+
+	buffer->ports = calloc(ncpus, sizeof(*buffer->ports));
+	if (!buffer->ports) {
+		buffer->nb_ports = 0;
+		return;
+	}
+	buffer->nb_ports = ncpus;
+	for (int cpu = 0; cpu < ncpus; cpu++) {
+		char *stream_name;
+
+		buffer->ports[cpu].cpu_id = cpu;
+		buffer->ports[cpu].buffer = buffer;
+		buffer->ports[cpu].stream =
+			bt_stream_create_with_id(buffer->stream_class, live->trace, cpu);
+		stream_name = ftrace_format_stream_name(NULL, buffer_index, cpu);
+		bt_stream_set_name(buffer->ports[cpu].stream, stream_name);
+		bt_self_component_source_add_output_port(
+			self_component_source, stream_name, &buffer->ports[cpu], NULL);
+		g_free(stream_name);
+	}
+}
+
 static int
 create_metadata_and_ports(bt_self_component_source *self_component_source,
 						  struct ftrace_live *live)
@@ -356,7 +508,6 @@ create_metadata_and_ports(bt_self_component_source *self_component_source,
 		bt_self_component_source_as_self_component(self_component_source);
 	bt_trace_class *trace_class = bt_trace_class_create(self_component);
 	bt_clock_class *clock_class = bt_clock_class_create(self_component);
-	const int ncpus = tep_get_cpus(live->tep);
 
 	live->options.config.mip_version =
 		bt_self_component_get_graph_mip_version(self_component);
@@ -364,11 +515,6 @@ create_metadata_and_ports(bt_self_component_source *self_component_source,
 		clock_class, live->clock_name, live->options.clock_name,
 		live->options.clock_offset_ns, live->options.clock_uid,
 		live->options.clock_namespace, live->options.config.mip_version);
-	live->stream_class =
-		ftrace_create_stream_class(trace_class, clock_class, BT_TRUE, 0);
-	bt_stream_class_set_name(live->stream_class, "ftrace-stream");
-	live->event_classes = ftrace_create_event_classes(
-		live->tep, live->stream_class, &live->options.config);
 	live->trace = bt_trace_create(trace_class);
 	bt_trace_set_name(live->trace,
 					  live->options.trace_name ? live->options.trace_name : "");
@@ -382,7 +528,7 @@ create_metadata_and_ports(bt_self_component_source *self_component_source,
 		bt_trace_set_uid(live->trace, live->trace_uid);
 #endif
 #if HAS_BT2_TRACE_NAMESPACE
-		bt_trace_set_namespace(live->trace, FTRACE_TRACE_NAMESPACE);
+		bt_trace_set_namespace(live->trace, FTRACE_NAMESPACE);
 #endif
 	}
 	ftrace_set_trace_environment(
@@ -390,30 +536,10 @@ create_metadata_and_ports(bt_self_component_source *self_component_source,
 		live->system_info.release, live->system_info.nodename,
 		live->options.trace_name, live->options.trace_creation_datetime,
 		FT_VERSION_MAJOR, FT_VERSION_MINOR);
-	live->ports = calloc(ncpus, sizeof(*live->ports));
-	if (!live->ports) {
-		bt_clock_class_put_ref(clock_class);
-		bt_trace_class_put_ref(trace_class);
-		return -1;
-	}
-	live->nb_ports = ncpus;
-	for (int cpu = 0; cpu < ncpus; cpu++) {
-		char *stream_name;
-		const struct ftrace_trace_identity identity = {
-			.namespace = FTRACE_TRACE_NAMESPACE,
-			.name = live->options.trace_name ? live->options.trace_name : "",
-			.uid = live->trace_uid,
-		};
-		live->ports[cpu].cpu_id = cpu;
-		live->ports[cpu].stream =
-			bt_stream_create_with_id(live->stream_class, live->trace, cpu);
-		stream_name =
-			ftrace_format_port_name(&identity, 0, cpu, live->tracing_dir);
-		bt_stream_set_name(live->ports[cpu].stream, stream_name);
-		bt_self_component_source_add_output_port(
-			self_component_source, stream_name, &live->ports[cpu], NULL);
-		g_free(stream_name);
-	}
+	for (unsigned int i = 0; i < live->nb_buffers; i++)
+		setup_ports_for_live_buffer(self_component_source, live,
+									&live->buffers[i], trace_class, clock_class,
+									i);
 	bt_clock_class_put_ref(clock_class);
 	bt_trace_class_put_ref(trace_class);
 	return 0;
@@ -466,20 +592,14 @@ ftrace_live_initialize(bt_self_component_source *self_component_source,
 	if (!ftrace_live_set_creation_datetime(live))
 		BT_FTRACE_LOG_WARNING(live->log_level,
 							  "cannot create trace creation datetime");
-	live->instance =
-		ftrace_live_open_existing_instance(path, &live->tracing_dir);
-	if (!live->instance) {
+	live->root_instance =
+		ftrace_live_open_existing_instance(path, &live->root_tracing_dir);
+	if (!live->root_instance) {
 		BT_FTRACE_LOG_ERROR(live->log_level,
 							"cannot open existing tracefs instance %s", path);
 		goto error;
 	}
-	live->tep = tracefs_local_events(live->tracing_dir);
-	if (!live->tep || tracefs_load_headers(live->tracing_dir, live->tep) < 0) {
-		BT_FTRACE_LOG_ERROR(live->log_level,
-							"cannot load tracefs metadata from %s", path);
-		goto error;
-	}
-	live->clock_name = tracefs_get_clock(live->instance);
+	live->clock_name = tracefs_get_clock(live->root_instance);
 	if (!live->clock_name) {
 		BT_FTRACE_LOG_ERROR(live->log_level,
 							"cannot read configured clock from %s", path);
@@ -495,13 +615,32 @@ ftrace_live_initialize(bt_self_component_source *self_component_source,
 		g_free(uid_seed);
 		goto error;
 	}
-	if (ftrace_live_derive_trace_uid(live->tracing_dir, uid_seed,
+	if (ftrace_live_derive_trace_uid(live->root_tracing_dir, uid_seed,
 									 live->trace_uid) < 0) {
 		BT_FTRACE_LOG_ERROR(live->log_level, "cannot derive a trace UID");
 		g_free(uid_seed);
 		goto error;
 	}
 	g_free(uid_seed);
+	/*
+	 * The opened directory is the first buffer. When it is a tracing root
+	 * (not itself an instance), also stream every instances/<name> buffer.
+	 */
+	{
+		const char *root_name = tracefs_instance_get_name(live->root_instance);
+		char *root_name_copy = root_name ? strdup(root_name) : NULL;
+		struct tracefs_instance *root_instance = live->root_instance;
+
+		/* the buffer takes ownership of the instance handle */
+		live->root_instance = NULL;
+		if (ftrace_live_add_buffer(live, root_instance, live->root_tracing_dir,
+								   root_name_copy) < 0)
+			goto error;
+		/* only a tracing root (unnamed) owns instances */
+		if (!root_name &&
+			ftrace_live_add_instances(live, live->root_tracing_dir) < 0)
+			goto error;
+	}
 	if (create_metadata_and_ports(self_component_source, live) < 0)
 		goto error;
 	return BT_COMPONENT_CLASS_INITIALIZE_METHOD_STATUS_OK;
@@ -533,7 +672,7 @@ ftrace_live_message_iterator_initialize(
 		bt_self_message_iterator_borrow_component(self_message_iterator));
 	iterator->port = bt_self_component_port_get_data(
 		bt_self_component_port_output_as_self_component_port(self_port));
-	iterator->cpu = tracefs_cpu_open(iterator->live->instance,
+	iterator->cpu = tracefs_cpu_open(iterator->port->buffer->instance,
 									 iterator->port->cpu_id, true);
 	if (!iterator->cpu) {
 		BT_FTRACE_LOG_ERROR(iterator->live->log_level,
@@ -584,11 +723,11 @@ bt_message_iterator_class_next_method_status ftrace_live_message_iterator_next(
 			 * end the stream, otherwise the iterator would spin forever
 			 * returning AGAIN without any data ever arriving.
 			 */
-			if (tracefs_trace_is_on(iterator->live->instance) > 0) {
+			if (tracefs_trace_is_on(iterator->port->buffer->instance) > 0) {
 				if (read_live_record(iterator))
 					goto emit;
 				/* Tracing may have stopped between the check and the read. */
-				if (tracefs_trace_is_on(iterator->live->instance) > 0)
+				if (tracefs_trace_is_on(iterator->port->buffer->instance) > 0)
 					break;
 			}
 			if (flush_live_record(iterator))

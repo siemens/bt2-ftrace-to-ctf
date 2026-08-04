@@ -6,7 +6,16 @@
  * can be used to sync the clocks of multiple traces. The format is as following:
  * {
  *   trace: { (uid: str | uuid: str)? },
- *   stream: { id: int, name: str},
+ *   stream: {
+ *     id: int,
+ *     name: str,
+ *     class: {
+ *       id: int,
+ *       name: str,
+ *       (uid: str)?,
+ *       (namespace: str)?,
+ *     }
+ *   },
  *   clock: { 
  *     offset_s: int,
  *     offset_c: int,
@@ -171,6 +180,29 @@ static void emit_metadata_json(struct tracemeta_out *cm_out,
 	json_builder_set_member_name(builder, "name");
 	const char *sname = bt_stream_get_name(stream);
 	json_builder_add_string_value(builder, sname ? sname : "");
+
+	/* stream class object */
+	const bt_stream_class *stream_class = bt_stream_borrow_class_const(stream);
+	json_builder_set_member_name(builder, "class");
+	json_builder_begin_object(builder);
+	json_builder_set_member_name(builder, "id");
+	json_builder_add_int_value(builder,
+							   (gint64)bt_stream_class_get_id(stream_class));
+#if HAS_BT2_STREAM_CLASS_UID
+	const char *sc_uid = bt_stream_class_get_uid(stream_class);
+	json_builder_set_member_name(builder, "uid");
+	json_builder_add_string_value(builder, sc_uid);
+#endif
+	const char *sc_name = bt_stream_class_get_name(stream_class);
+	json_builder_set_member_name(builder, "name");
+	json_builder_add_string_value(builder, sc_name ? sc_name : "");
+#if HAS_BT2_STREAM_CLASS_NAMESPACE
+	json_builder_set_member_name(builder, "namespace");
+	const char *sc_ns = bt_stream_class_get_namespace(stream_class);
+	json_builder_add_string_value(builder, sc_ns ? sc_ns : "");
+#endif
+	json_builder_end_object(builder);
+
 	json_builder_end_object(builder);
 
 	/* clock object */

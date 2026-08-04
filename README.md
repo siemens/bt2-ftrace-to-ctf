@@ -91,8 +91,17 @@ whereby each object is as following:
 
 ```
 {
-  trace: { (uid: <str> | uuid: <str>)? },
-  stream: { id: <int>, name: <str>},
+  trace: { (uid: str | uuid: str)? },
+  stream: {
+    id: int,
+    name: str,
+    class: {
+      id: int,
+      name: str,
+      (uid: str)?,
+      (namespace: str)?,
+    }
+  },
   clock: { 
     offset_s: int,
     offset_c: int,
