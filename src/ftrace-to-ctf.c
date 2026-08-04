@@ -199,10 +199,12 @@ int parse_args(int argc, char *argv[], prog_opts *opts)
 		case 'h': /* fall‑through */
 		case '?': /* unknown option */
 			print_usage(argv[0]);
+			clear_opts(opts);
 			return 1;
 
 		default:
 			/* Should never happen */
+			clear_opts(opts);
 			return 1;
 		}
 	}
@@ -214,6 +216,7 @@ int parse_args(int argc, char *argv[], prog_opts *opts)
 				"Error: expected two or three positional arguments, got %d.\n",
 				positional_left);
 		print_usage(argv[0]);
+		clear_opts(opts);
 		return 1;
 	}
 
@@ -232,6 +235,7 @@ int parse_args(int argc, char *argv[], prog_opts *opts)
 				"Allowed values are: 1, 1.8, 2.\n",
 				opts->ctf_version);
 		print_usage(argv[0]);
+		clear_opts(opts);
 		return 1;
 	}
 	if (strcmp(opts->ctf_version, "1.8") == 0 && opts->callstack) {
@@ -241,10 +245,12 @@ int parse_args(int argc, char *argv[], prog_opts *opts)
 	}
 	if (access(opts->trace_path, R_OK) != 0) {
 		perror("cannot read trace file");
+		clear_opts(opts);
 		return 1;
 	}
 	if (access(opts->out_dir, W_OK) != 0) {
 		perror("cannot write to output directory");
+		clear_opts(opts);
 		return 1;
 	}
 
