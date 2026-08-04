@@ -349,11 +349,17 @@ setup_ports_for_trace_buffer(struct ftrace_in *ftrace_in,
 			continue;
 		tracecmd_free_record(rec);
 
-		const uint64_t stream_id = ((uint64_t)buffer_index << 32) | pd->cpu_id;
+		/*
+		 * Each buffer instance is its own stream class, so the stream id
+		 * only needs to identify the CPU. The (stream-class-id, stream-id)
+		 * pair (buffer index, CPU) is unique across the trace.
+		 */
+		const uint64_t stream_id = pd->cpu_id;
 		pd->stream = bt_stream_create_with_id(tc_buffer->stream_class,
 											  ftrace_in->trace, stream_id);
-		char *stream_name = ftrace_format_port_name(
-			&ftrace_in->trace_identity, 0, stream_id, ftrace_in->tracedat_path);
+		char *stream_name = ftrace_format_port_name(&ftrace_in->trace_identity,
+													buffer_index, stream_id,
+													ftrace_in->tracedat_path);
 		bt_stream_set_name(pd->stream, stream_name);
 		bt_self_component_source_add_output_port(self_component_source,
 												 stream_name, pd, NULL);
