@@ -100,6 +100,9 @@ whereby each object is as following:
       name: str,
       (uid: str)?,
       (namespace: str)?,
+      supports-packets: bool,
+      supports-discarded-events: bool,
+      supports-discarded-packets: bool
     }
   },
   clock: { 
