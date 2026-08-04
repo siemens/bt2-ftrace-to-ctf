@@ -84,7 +84,7 @@ static void append_stream_infos(struct tracecmd_input *tc_input,
 		bt_value_array_append_empty_map_element(infos, &streaminfo);
 		bt_value_map_insert_string_entry(streaminfo, "port-name", NAME_BUF);
 		bt_value_map_insert_empty_map_entry(streaminfo, "range-ns", &range);
-		bt_value_map_insert_signed_integer_entry(range, "begin-ns",
+		bt_value_map_insert_signed_integer_entry(range, "begin",
 												 (int64_t)ts_begin);
 		cpu_set_t cpu_set;
 		CPU_ZERO(&cpu_set);
@@ -107,7 +107,7 @@ static void append_stream_infos(struct tracecmd_input *tc_input,
 			rec = tracecmd_read_data(tc_input, i);
 		}
 #endif
-		bt_value_map_insert_signed_integer_entry(range, "end-ns", ts_end);
+		bt_value_map_insert_signed_integer_entry(range, "end", ts_end);
 	}
 }
 
@@ -136,9 +136,11 @@ ftrace_query_trace_infos(bt_self_component_class_source *self_component_class,
 		return BT_COMPONENT_CLASS_QUERY_METHOD_STATUS_ERROR;
 	}
 
-	bt_value *response = bt_value_map_create();
+	bt_value *response = bt_value_array_create();
+	bt_value *trace_info;
 	bt_value *infos;
-	bt_value_map_insert_empty_array_entry(response, "stream-infos", &infos);
+	bt_value_array_append_empty_map_element(response, &trace_info);
+	bt_value_map_insert_empty_array_entry(trace_info, "stream-infos", &infos);
 
 	/* main buffer */
 	append_stream_infos(tc_main, NULL, infos);
