@@ -27,6 +27,8 @@ struct ftrace_live_port {
 enum ftrace_live_iterator_state {
 	FTRACE_LIVE_ITERATOR_STATE_STREAM_BEGINNING,
 	FTRACE_LIVE_ITERATOR_STATE_EVENT,
+	FTRACE_LIVE_ITERATOR_STATE_STREAM_ENDING,
+	FTRACE_LIVE_ITERATOR_STATE_ENDED,
 };
 
 struct ftrace_live_iterator {
@@ -36,6 +38,7 @@ struct ftrace_live_iterator {
 	struct kbuffer *buffer;
 	struct tep_record record;
 	bool record_ready;
+	bool trace_flushed;
 	bt_packet *packet;
 	bool packet_end_pending;
 	long long events_discarded;
@@ -76,13 +79,20 @@ create_live_message(struct ftrace_live_iterator *iterator,
 												  stream);
 	}
 	if (iterator->packet &&
-		(iterator->events_discarded || iterator->packet_end_pending)) {
+		(iterator->events_discarded || iterator->packet_end_pending ||
+		 iterator->state == FTRACE_LIVE_ITERATOR_STATE_STREAM_ENDING)) {
 		message = bt_message_packet_end_create_with_default_clock_snapshot(
 			self_message_iterator, iterator->packet, iterator->last_record_ts);
 		BT_PACKET_PUT_REF_AND_RESET(iterator->packet);
 		iterator->packet_end_pending = false;
 		return message;
 	}
+	if (iterator->state == FTRACE_LIVE_ITERATOR_STATE_STREAM_ENDING) {
+		iterator->state = FTRACE_LIVE_ITERATOR_STATE_ENDED;
+		return bt_message_stream_end_create(self_message_iterator, stream);
+	}
+	if (iterator->state == FTRACE_LIVE_ITERATOR_STATE_ENDED)
+		return NULL;
 	if (iterator->events_discarded) {
 		message =
 			bt_message_discarded_events_create_with_default_clock_snapshots(
@@ -178,21 +188,12 @@ static void add_discarded_events(struct ftrace_live_iterator *iterator,
 		iterator->events_discarded += missed_events;
 }
 
-static bool read_live_record(struct ftrace_live_iterator *iterator)
+static bool read_live_buffer(struct ftrace_live_iterator *iterator)
 {
 	void *data;
 
-	while (
-		!iterator->buffer ||
-		!(data = kbuffer_read_event(iterator->buffer, &iterator->record.ts))) {
-		if (iterator->buffer && iterator->packet)
-			iterator->packet_end_pending = true;
-		iterator->buffer = tracefs_cpu_read_buf(iterator->cpu, true);
-		if (!iterator->buffer)
-			return false;
-		/* the dropped events are reported per sub-buffer */
-		add_discarded_events(iterator, kbuffer_missed_events(iterator->buffer));
-	}
+	if (!(data = kbuffer_read_event(iterator->buffer, &iterator->record.ts)))
+		return false;
 	iterator->record.data = data;
 	iterator->record.size = kbuffer_event_size(iterator->buffer);
 	iterator->record.record_size = kbuffer_curr_size(iterator->buffer);
@@ -201,6 +202,41 @@ static bool read_live_record(struct ftrace_live_iterator *iterator)
 	kbuffer_next_event(iterator->buffer, NULL);
 	iterator->record_ready = true;
 	return true;
+}
+
+static bool read_live_record(struct ftrace_live_iterator *iterator)
+{
+	while (!iterator->buffer || !read_live_buffer(iterator)) {
+		if (iterator->buffer && iterator->packet)
+			iterator->packet_end_pending = true;
+		iterator->buffer = tracefs_cpu_read_buf(iterator->cpu, true);
+		if (!iterator->buffer)
+			return false;
+		/* the dropped events are reported per sub-buffer */
+		add_discarded_events(iterator, kbuffer_missed_events(iterator->buffer));
+	}
+	return true;
+}
+
+/*
+ * Once tracing is off, tracefs_cpu_read_buf() only returns complete
+ * sub-buffers, leaving the events of the currently written sub-buffer behind.
+ * Flush it once so those trailing events are not lost before we end the stream.
+ * Returns true if a record became available.
+ */
+static bool flush_live_record(struct ftrace_live_iterator *iterator)
+{
+	if (iterator->trace_flushed)
+		return false;
+	iterator->trace_flushed = true;
+	if (iterator->buffer && iterator->packet)
+		iterator->packet_end_pending = true;
+	iterator->buffer = tracefs_cpu_flush_buf(iterator->cpu);
+	if (!iterator->buffer)
+		return false;
+	/* the dropped events are reported per sub-buffer */
+	add_discarded_events(iterator, kbuffer_missed_events(iterator->buffer));
+	return read_live_buffer(iterator);
 }
 
 static void ftrace_live_free(struct ftrace_live *live)
@@ -540,16 +576,38 @@ bt_message_iterator_class_next_method_status ftrace_live_message_iterator_next(
 		bt_message *message;
 
 		if (iterator->state == FTRACE_LIVE_ITERATOR_STATE_EVENT &&
-			!iterator->record_ready && !read_live_record(iterator))
-			break;
+			!iterator->record_ready) {
+			/*
+			 * Only keep polling while tracing is explicitly on. A zero
+			 * (tracing off) or negative (tracing_on unreadable) result must
+			 * end the stream, otherwise the iterator would spin forever
+			 * returning AGAIN without any data ever arriving.
+			 */
+			if (tracefs_trace_is_on(iterator->live->instance) > 0) {
+				if (read_live_record(iterator))
+					goto emit;
+				/* Tracing may have stopped between the check and the read. */
+				if (tracefs_trace_is_on(iterator->live->instance) > 0)
+					break;
+			}
+			if (flush_live_record(iterator))
+				continue;
+			iterator->state = FTRACE_LIVE_ITERATOR_STATE_STREAM_ENDING;
+		}
+emit:
 		message = create_live_message(iterator, self_message_iterator);
 		if (message)
 			messages[message_count++] = message;
+		else if (iterator->state == FTRACE_LIVE_ITERATOR_STATE_ENDED)
+			break;
 	}
-	if (!message_count)
-		return BT_MESSAGE_ITERATOR_CLASS_NEXT_METHOD_STATUS_AGAIN;
-	*count = message_count;
-	return BT_MESSAGE_ITERATOR_CLASS_NEXT_METHOD_STATUS_OK;
+	if (message_count) {
+		*count = message_count;
+		return BT_MESSAGE_ITERATOR_CLASS_NEXT_METHOD_STATUS_OK;
+	}
+	if (iterator->state == FTRACE_LIVE_ITERATOR_STATE_ENDED)
+		return BT_MESSAGE_ITERATOR_CLASS_NEXT_METHOD_STATUS_END;
+	return BT_MESSAGE_ITERATOR_CLASS_NEXT_METHOD_STATUS_AGAIN;
 }
 
 bt_component_class_get_supported_mip_versions_method_status
