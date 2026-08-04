@@ -6,11 +6,36 @@
  */
 
 #include <tracefs.h>
+#include <glib.h>
 #include <stdlib.h>
 
 #include "bt-ftrace-common.h"
 #include "bt-ftrace-source-live.h"
 #include "bt-ftrace-source-live-query.h"
+
+/*
+ * A tracefs tracing directory (root or an instance) always exposes these
+ * files. Checking them on disk lets us recognize a directory without relying
+ * on tracefs_instance_alloc(), which requires the path to match the tracing
+ * mount point libtracefs auto-detected. Recognizing the directory here is also
+ * what stops babeltrace source auto-discovery from recursing into the whole
+ * tracefs tree (per_cpu, events, and so on), which is very slow.
+ */
+static bool ftrace_live_is_tracing_dir(const char *path)
+{
+	static const char *const markers[] = { "trace", "tracing_on", "per_cpu" };
+	bool is_dir = true;
+
+	for (size_t i = 0; i < G_N_ELEMENTS(markers); i++) {
+		char *marker = g_build_filename(path, markers[i], NULL);
+		if (!g_file_test(marker, G_FILE_TEST_EXISTS))
+			is_dir = false;
+		g_free(marker);
+		if (!is_dir)
+			break;
+	}
+	return is_dir;
+}
 
 static bt_component_class_query_method_status
 ftrace_live_query_support_info(const bt_value *params, const bt_value **result)
@@ -21,11 +46,9 @@ ftrace_live_query_support_info(const bt_value *params, const bt_value **result)
 		bt_value_map_borrow_entry_value_const(params, "input");
 	struct tracefs_instance *instance;
 	char *tracing_dir = NULL;
-	char *tracing_on;
 	char *uid_seed;
 	char trace_uid[UUID_STR_LEN];
 	char *group;
-	int size;
 
 	if (!type || !input || !bt_value_is_string(type) ||
 		!bt_value_is_string(input) ||
@@ -35,12 +58,14 @@ ftrace_live_query_support_info(const bt_value *params, const bt_value **result)
 	}
 	instance = ftrace_live_open_existing_instance(bt_value_string_get(input),
 												  &tracing_dir);
-	/* try to read tracing_on. No check if tracing is actually on */
-	tracing_on = instance ?
-					 tracefs_instance_file_read(instance, "tracing_on", &size) :
-					 NULL;
-	if (tracing_on) {
-		free(tracing_on);
+	/*
+	 * Recognize the directory only if it is an actual tracefs tracing
+	 * directory (root or instance). This claims the directory so that
+	 * auto-discovery does not recurse into its (huge) subtree. The on-disk
+	 * marker check is authoritative and does not depend on the instance
+	 * handle, which tracefs_instance_alloc() may refuse for the tracing root.
+	 */
+	if (tracing_dir && ftrace_live_is_tracing_dir(tracing_dir)) {
 		uid_seed = ftrace_live_derive_uid();
 		if (!uid_seed || ftrace_live_derive_trace_uid(tracing_dir, uid_seed,
 													  trace_uid) < 0) {
@@ -51,7 +76,7 @@ ftrace_live_query_support_info(const bt_value *params, const bt_value **result)
 		}
 		g_free(uid_seed);
 		group = g_strdup_printf("namespace: %s, name: , uid: %s",
-								FTRACE_TRACE_NAMESPACE, trace_uid);
+								FTRACE_NAMESPACE, trace_uid);
 		bt_value *response = bt_value_map_create();
 		bt_value_map_insert_real_entry(response, "weight", 1);
 		bt_value_map_insert_string_entry(response, "group", group);
@@ -65,13 +90,45 @@ ftrace_live_query_support_info(const bt_value *params, const bt_value **result)
 	return BT_COMPONENT_CLASS_QUERY_METHOD_STATUS_OK;
 }
 
+/*
+ * Emit one stream-info per CPU of a tracing directory, using the same port
+ * identity as the live source (buffer index as stream-class id, CPU as stream
+ * id). Returns 0 on success, -1 on error.
+ */
+static int
+append_live_stream_infos(bt_value *stream_infos, const char *tracing_dir,
+						 const struct ftrace_trace_identity *identity,
+						 unsigned int buffer_index)
+{
+	struct tep_handle *tep = tracefs_local_events(tracing_dir);
+
+	if (!tep || tracefs_load_headers(tracing_dir, tep) < 0) {
+		tep_free(tep);
+		return -1;
+	}
+	for (int cpu = 0; cpu < tep_get_cpus(tep); cpu++) {
+		bt_value *stream_info;
+		bt_value *range;
+		char *port_name =
+			ftrace_format_port_name(identity, buffer_index, cpu, tracing_dir);
+
+		bt_value_array_append_empty_map_element(stream_infos, &stream_info);
+		bt_value_map_insert_string_entry(stream_info, "port-name", port_name);
+		g_free(port_name);
+		bt_value_map_insert_empty_map_entry(stream_info, "range-ns", &range);
+		bt_value_map_insert_signed_integer_entry(range, "begin", 0);
+		bt_value_map_insert_signed_integer_entry(range, "end", INT64_MAX);
+	}
+	tep_free(tep);
+	return 0;
+}
+
 static bt_component_class_query_method_status
 ftrace_live_query_trace_infos(const bt_value *params, const bt_value **result)
 {
 	const bt_value *inputs;
 	const bt_value *path_value;
 	struct tracefs_instance *instance;
-	struct tep_handle *tep;
 	char *tracing_dir = NULL;
 	bt_value *response;
 	bt_value *trace_info;
@@ -79,6 +136,7 @@ ftrace_live_query_trace_infos(const bt_value *params, const bt_value **result)
 	struct ftrace_common_options options = { 0 };
 	char trace_uid[UUID_STR_LEN];
 	char *uid_seed;
+	unsigned int buffer_index = 0;
 
 	if (!params ||
 		!(inputs = bt_value_map_borrow_entry_value_const(params, "inputs")) ||
@@ -92,48 +150,57 @@ ftrace_live_query_trace_infos(const bt_value *params, const bt_value **result)
 		bt_value_string_get(path_value), &tracing_dir);
 	if (!instance)
 		return BT_COMPONENT_CLASS_QUERY_METHOD_STATUS_ERROR;
-	tep = tracefs_local_events(tracing_dir);
-	if (!tep || tracefs_load_headers(tracing_dir, tep) < 0) {
-		tep_free(tep);
-		tracefs_instance_free(instance);
-		free(tracing_dir);
-		return BT_COMPONENT_CLASS_QUERY_METHOD_STATUS_ERROR;
-	}
 	ftrace_parse_common_params(params, &options);
 	uid_seed = ftrace_live_derive_uid();
 	if (!uid_seed ||
 		ftrace_live_derive_trace_uid(tracing_dir, uid_seed, trace_uid) < 0) {
 		g_free(uid_seed);
 		ftrace_common_opts_free(&options);
-		tep_free(tep);
 		tracefs_instance_free(instance);
 		free(tracing_dir);
 		return BT_COMPONENT_CLASS_QUERY_METHOD_STATUS_ERROR;
 	}
 	g_free(uid_seed);
+
+	const struct ftrace_trace_identity identity = {
+		.namespace = FTRACE_NAMESPACE,
+		.name = options.trace_name ? options.trace_name : "",
+		.uid = trace_uid,
+	};
 	response = bt_value_array_create();
 	bt_value_array_append_empty_map_element(response, &trace_info);
 	bt_value_map_insert_empty_array_entry(trace_info, "stream-infos",
 										  &stream_infos);
-	for (int cpu = 0; cpu < tep_get_cpus(tep); cpu++) {
-		bt_value *stream_info;
-		bt_value *range;
-		const struct ftrace_trace_identity identity = {
-			.namespace = FTRACE_TRACE_NAMESPACE,
-			.name = options.trace_name ? options.trace_name : "",
-			.uid = trace_uid,
-		};
-		char *port_name =
-			ftrace_format_port_name(&identity, 0, cpu, tracing_dir);
 
-		bt_value_array_append_empty_map_element(stream_infos, &stream_info);
-		bt_value_map_insert_string_entry(stream_info, "port-name", port_name);
-		g_free(port_name);
-		bt_value_map_insert_empty_map_entry(stream_info, "range-ns", &range);
-		bt_value_map_insert_signed_integer_entry(range, "begin", 0);
-		bt_value_map_insert_signed_integer_entry(range, "end", INT64_MAX);
+	/* the opened directory is the first buffer */
+	if (append_live_stream_infos(stream_infos, tracing_dir, &identity,
+								 buffer_index++) < 0) {
+		BT_VALUE_PUT_REF_AND_RESET(response);
+		ftrace_common_opts_free(&options);
+		tracefs_instance_free(instance);
+		free(tracing_dir);
+		return BT_COMPONENT_CLASS_QUERY_METHOD_STATUS_ERROR;
 	}
-	tep_free(tep);
+
+	/* a tracing root (not itself an instance) also owns instances/<name> */
+	if (!tracefs_instance_get_name(instance)) {
+		char *instances_dir = g_build_filename(tracing_dir, "instances", NULL);
+		GDir *dir = g_dir_open(instances_dir, 0, NULL);
+		const char *name;
+
+		while (dir && (name = g_dir_read_name(dir))) {
+			char *instance_dir = g_build_filename(instances_dir, name, NULL);
+
+			if (g_file_test(instance_dir, G_FILE_TEST_IS_DIR))
+				(void)append_live_stream_infos(stream_infos, instance_dir,
+											   &identity, buffer_index++);
+			g_free(instance_dir);
+		}
+		if (dir)
+			g_dir_close(dir);
+		g_free(instances_dir);
+	}
+
 	tracefs_instance_free(instance);
 	free(tracing_dir);
 	ftrace_common_opts_free(&options);

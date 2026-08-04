@@ -23,7 +23,14 @@
 		0x98, 0xa8, 0x92, 0x2b, 0xe8, 0xcf, 0x77, 0x78, \
 	}
 
+#define FTRACE_STREAM_CLASS_UUID_NAMESPACE              \
+	{                                                   \
+		0x2d, 0x38, 0x0c, 0xd8, 0x5d, 0x7c, 0x4d, 0x2e, \
+		0xb1, 0xdb, 0x5b, 0xd7, 0x67, 0x11, 0x57, 0x7d, \
+	}
+
 #define FTRACE_NAMESPACE "ftrace"
+#define LTTNG_NAMESPACE "lttng.org,2009"
 
 struct ftrace_common_config {
 	bt_bool lttng_format;
@@ -61,6 +68,9 @@ void ftrace_parse_common_params(const bt_value *params,
 
 void ftrace_common_opts_free(struct ftrace_common_options *options);
 
+char *ftrace_format_stream_name(const char *path, uint64_t stream_class_id,
+								uint64_t stream_id);
+
 char *ftrace_format_port_name(const struct ftrace_trace_identity *identity,
 							  uint64_t stream_class_id, uint64_t stream_id,
 							  const char *fallback_path);
@@ -75,7 +85,9 @@ ftrace_create_event_class(bt_stream_class *stream_class,
 bt_stream_class *ftrace_create_stream_class(bt_trace_class *trace_class,
 											bt_clock_class *clock_class,
 											bt_bool supports_packets,
-											uint64_t stream_class_id);
+											uint64_t stream_class_id,
+											const char *trace_uid,
+											bt_bool lttng_format);
 
 GHashTable *
 ftrace_create_event_classes(struct tep_handle *tep,

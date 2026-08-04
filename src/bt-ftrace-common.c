@@ -62,6 +62,16 @@ void ftrace_common_opts_free(struct ftrace_common_options *options)
 	memset(options, 0, sizeof(*options));
 }
 
+char *ftrace_format_stream_name(const char *path, uint64_t stream_class_id,
+								uint64_t stream_id)
+{
+	if (path)
+		return g_strdup_printf("%s/channel%lu_%lu", path, stream_class_id,
+							   stream_id);
+	else
+		return g_strdup_printf("channel%lu_%lu", stream_class_id, stream_id);
+}
+
 char *ftrace_format_port_name(const struct ftrace_trace_identity *identity,
 							  uint64_t stream_class_id, uint64_t stream_id,
 							  const char *fallback_path)
@@ -267,12 +277,45 @@ ftrace_create_event_class(bt_stream_class *stream_class,
 bt_stream_class *ftrace_create_stream_class(bt_trace_class *trace_class,
 											bt_clock_class *clock_class,
 											bt_bool supports_packets,
-											uint64_t stream_class_id)
+											uint64_t stream_class_id,
+											const char *trace_uid,
+											bt_bool lttng_format)
 {
+#if HAS_BT2_STREAM_CLASS_NAMESPACE
+	const uint64_t mip_version =
+		bt_trace_class_get_graph_mip_version(trace_class);
+#else
+	const uint64_t mip_version = 0;
+#endif
+
 	bt_trace_class_set_assigns_automatic_stream_class_id(trace_class, BT_FALSE);
 	bt_stream_class *stream_class =
 		bt_stream_class_create_with_id(trace_class, stream_class_id);
 	bt_stream_class_set_assigns_automatic_stream_id(stream_class, BT_FALSE);
+
+#if HAS_BT2_STREAM_CLASS_NAMESPACE
+	if (mip_version == 1) {
+		bt_stream_class_set_namespace(
+			stream_class, lttng_format ? LTTNG_NAMESPACE : FTRACE_NAMESPACE);
+	}
+#endif
+#if HAS_BT2_STREAM_CLASS_UID
+	if (mip_version == 1) {
+		static const uuid_t stream_class_namespace =
+			FTRACE_STREAM_CLASS_UUID_NAMESPACE;
+		uuid_t stream_class_uuid;
+		char stream_class_uid[UUID_STR_LEN];
+		char seed[UUID_STR_LEN + sizeof(stream_class_id)];
+		const size_t trace_uid_len = strlen(trace_uid) + 1;
+
+		memcpy(seed, trace_uid, trace_uid_len);
+		memcpy(seed + trace_uid_len, &stream_class_id, sizeof(stream_class_id));
+		uuid_generate_md5(stream_class_uuid, stream_class_namespace, seed,
+						  trace_uid_len + sizeof(stream_class_id));
+		uuid_unparse(stream_class_uuid, stream_class_uid);
+		bt_stream_class_set_uid(stream_class, stream_class_uid);
+	}
+#endif
 
 	bt_stream_class_set_default_clock_class(stream_class, clock_class);
 	bt_stream_class_set_supports_discarded_events(stream_class, BT_TRUE,
