@@ -4,3 +4,7 @@ option('tracecmd-internals',
        description: 'Enable code that depends on private libtracecmd symbols',
        type: 'boolean',
        value: false)
+option('tests',
+       description: 'Build with CMocka unit tests',
+       type: 'feature',
+       value: 'auto')

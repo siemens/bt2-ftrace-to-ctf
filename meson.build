@@ -61,6 +61,22 @@ config_inc = include_directories('.')
 
 summary({'private libtracecmd symbols (plugin)': get_option('tracecmd-internals')}, bool_yn: true, section: 'Build Configuration')
 
+common_sources = files(
+  'src/bt-ftrace-logging.h',
+  'src/bt-ftrace-lttng-events.c',
+  'src/bt-ftrace-lttng-events.h',
+  'src/bt-ftrace-plugin.c',
+  'src/bt-ftrace-source-query.c',
+  'src/bt-ftrace-source-query.h',
+  'src/bt-ftrace-source.c',
+  'src/bt-ftrace-source.h',
+  'src/bt-ftrace-sym-field.h',
+  'src/bt-ftrace-sym-field.c',
+  'src/bt-ftrace-utils.h',
+  'src/bt-ftrace-tracemeta.c',
+  'src/bt-ftrace-tracemeta.h',
+)
+
 # hidden symbols are supported from babeltrace 2.1 on:
 # https://github.com/efficios/babeltrace/commit/1353b066072e6c389ff35853bac83f65597e7a6a
 if babeltrace2_dep.version().version_compare('>=2.1')
@@ -69,21 +85,7 @@ else
   bt2_plugin_sym_vis = 'default'
 endif
 bt2_ftrace_plugin = shared_library('babeltrace-plugin-ftrace',
-  sources: files(
-    'src/bt-ftrace-logging.h',
-    'src/bt-ftrace-lttng-events.c',
-    'src/bt-ftrace-lttng-events.h',
-    'src/bt-ftrace-plugin.c',
-    'src/bt-ftrace-source-query.c',
-    'src/bt-ftrace-source-query.h',
-    'src/bt-ftrace-source.c',
-    'src/bt-ftrace-source.h',
-    'src/bt-ftrace-sym-field.h',
-    'src/bt-ftrace-sym-field.c',
-    'src/bt-ftrace-tracemeta.c',
-    'src/bt-ftrace-tracemeta.h',
-    'src/bt-ftrace-utils.h',
-    ),
+  sources: common_sources,
   c_args: ['-Wno-unused-parameter'],
   gnu_symbol_visibility: bt2_plugin_sym_vis,
   include_directories: config_inc,
@@ -112,3 +114,28 @@ executable('ftrace-to-ctf',
 )
 
 subdir('man')
+
+# Unit-Tests
+cmocka_dep = dependency('tests', required: get_option('tests'))
+
+if cmocka_dep.found()
+  message('Building unit tests with Cmocka.')
+  testable_lib = static_library('testable',
+    sources: common_sources + files(
+      'src/ftrace-to-ctf.c',
+      'src/trace-cmd-private.h'
+    ),
+    include_directories: config_inc,
+    c_args: ['-Wno-unused-parameter'],
+    dependencies:
+    [
+      tracecmd_dep,
+      traceevent_dep,
+      babeltrace2_dep,
+      glib_dep,
+      json_glib_dep,
+      uuid_dep
+    ]
+  )
+  subdir('tests')
+endif
