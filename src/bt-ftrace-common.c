@@ -266,14 +266,14 @@ ftrace_create_event_class(bt_stream_class *stream_class,
 
 bt_stream_class *ftrace_create_stream_class(bt_trace_class *trace_class,
 											bt_clock_class *clock_class,
-											bt_bool supports_packets)
+											bt_bool supports_packets,
+											uint64_t stream_class_id)
 {
 	bt_trace_class_set_assigns_automatic_stream_class_id(trace_class, BT_FALSE);
 	bt_stream_class *stream_class =
-		bt_stream_class_create_with_id(trace_class, 0);
+		bt_stream_class_create_with_id(trace_class, stream_class_id);
 	bt_stream_class_set_assigns_automatic_stream_id(stream_class, BT_FALSE);
 
-	bt_stream_class_set_name(stream_class, "ftrace-stream");
 	bt_stream_class_set_default_clock_class(stream_class, clock_class);
 	bt_stream_class_set_supports_discarded_events(stream_class, BT_TRUE,
 												  BT_TRUE);

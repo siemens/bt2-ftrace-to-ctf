@@ -365,7 +365,8 @@ create_metadata_and_ports(bt_self_component_source *self_component_source,
 		live->options.clock_offset_ns, live->options.clock_uid,
 		live->options.clock_namespace, live->options.config.mip_version);
 	live->stream_class =
-		ftrace_create_stream_class(trace_class, clock_class, BT_TRUE);
+		ftrace_create_stream_class(trace_class, clock_class, BT_TRUE, 0);
+	bt_stream_class_set_name(live->stream_class, "ftrace-stream");
 	live->event_classes = ftrace_create_event_classes(
 		live->tep, live->stream_class, &live->options.config);
 	live->trace = bt_trace_create(trace_class);
