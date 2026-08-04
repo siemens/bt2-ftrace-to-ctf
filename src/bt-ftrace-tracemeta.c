@@ -14,6 +14,9 @@
  *       name: str,
  *       (uid: str)?,
  *       (namespace: str)?,
+ *       supports-packets: bool,
+ *       supports-discarded-events: bool,
+ *       supports-discarded-packets: bool
  *     }
  *   },
  *   clock: { 
@@ -201,6 +204,15 @@ static void emit_metadata_json(struct tracemeta_out *cm_out,
 	const char *sc_ns = bt_stream_class_get_namespace(stream_class);
 	json_builder_add_string_value(builder, sc_ns ? sc_ns : "");
 #endif
+	json_builder_set_member_name(builder, "supports-packets");
+	json_builder_add_boolean_value(
+		builder, bt_stream_class_supports_packets(stream_class));
+	json_builder_set_member_name(builder, "supports-discarded-events");
+	json_builder_add_boolean_value(
+		builder, bt_stream_class_supports_discarded_events(stream_class));
+	json_builder_set_member_name(builder, "supports-discarded-packets");
+	json_builder_add_boolean_value(
+		builder, bt_stream_class_supports_discarded_packets(stream_class));
 	json_builder_end_object(builder);
 
 	json_builder_end_object(builder);
