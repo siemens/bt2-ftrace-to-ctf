@@ -106,7 +106,7 @@ int64_t lttng_get_field_val_from_event_signed(const struct tep_event *event,
 											  const char *field_name,
 											  int64_t val)
 {
-	/* LTTng prios are shown as observed by userspace */
+	/* LTTng scheduler priorities are kernel priorities minus MAX_RT_PRIO. */
 	if ((strcmp(event->system, "sched") == 0) && strstr(field_name, "prio")) {
 		return val - MAX_RT_PRIO;
 	}
