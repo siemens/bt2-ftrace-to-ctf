@@ -367,10 +367,9 @@ void ftrace_set_trace_environment(
 	const char *trace_name, const char *trace_creation_datetime,
 	int tracer_version_major, int tracer_version_minor)
 {
-	if (trace_name) {
-		bt_trace_set_name(trace, trace_name);
-		bt_trace_set_environment_entry_string(trace, "trace_name", trace_name);
-	}
+	const char *_trace_name = trace_name ? trace_name : "default";
+	bt_trace_set_name(trace, _trace_name);
+	bt_trace_set_environment_entry_string(trace, "trace_name", _trace_name);
 	bt_trace_set_environment_entry_string(trace, "domain", "kernel");
 	bt_trace_set_environment_entry_string(trace, "sysname", sysname);
 	if (kernel_release)
