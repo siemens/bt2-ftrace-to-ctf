@@ -55,6 +55,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <trace-cmd.h>
 #include <uuid.h>
 
@@ -135,6 +136,27 @@ get_common_config(const struct ftrace_in *ftrace_in)
 		.log_level = ftrace_in->log_level,
 		.mip_version = ftrace_in->mip_version,
 	};
+}
+
+static char *ftrace_live_trace_creation_datetime_from_file(const char *path)
+{
+	struct stat stat_buf;
+	GDateTime *datetime;
+	char *formatted;
+	char *result;
+
+	if (stat(path, &stat_buf) < 0)
+		return NULL;
+	datetime = g_date_time_new_from_unix_local(stat_buf.st_mtime);
+	if (!datetime)
+		return NULL;
+	formatted = g_date_time_format(datetime, "%Y%m%dT%H%M%S%z");
+	g_date_time_unref(datetime);
+	if (!formatted)
+		return NULL;
+	result = strdup(formatted);
+	g_free(formatted);
+	return result;
 }
 
 /*
@@ -289,6 +311,11 @@ static void create_metadata_and_trace(bt_self_component *self_component,
 		snprintf(NAME_BUF, sizeof(NAME_BUF), "0x%llx", traceid);
 		bt_trace_set_environment_entry_string(trace, "tracecmd_traceid",
 											  NAME_BUF);
+	}
+	if (!ftrace_in->options.trace_creation_datetime) {
+		ftrace_in->options.trace_creation_datetime =
+			ftrace_live_trace_creation_datetime_from_file(
+				ftrace_in->tracedat_path);
 	}
 
 	ftrace_set_trace_environment(trace, &config, ftrace_in->trace_sysname,
