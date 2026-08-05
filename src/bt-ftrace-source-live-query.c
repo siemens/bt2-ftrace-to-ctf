@@ -40,6 +40,7 @@ static bool ftrace_live_is_tracing_dir(const char *path)
 static bt_component_class_query_method_status
 ftrace_live_query_support_info(const bt_value *params, const bt_value **result)
 {
+	struct ftrace_common_options options = { 0 };
 	const bt_value *type =
 		bt_value_map_borrow_entry_value_const(params, "type");
 	const bt_value *input =
@@ -56,6 +57,7 @@ ftrace_live_query_support_info(const bt_value *params, const bt_value **result)
 		*result = bt_value_real_create_init(0);
 		return BT_COMPONENT_CLASS_QUERY_METHOD_STATUS_OK;
 	}
+	ftrace_parse_common_params(params, &options);
 	instance = ftrace_live_open_existing_instance(bt_value_string_get(input),
 												  &tracing_dir);
 	/*
@@ -75,8 +77,11 @@ ftrace_live_query_support_info(const bt_value *params, const bt_value **result)
 			return BT_COMPONENT_CLASS_QUERY_METHOD_STATUS_ERROR;
 		}
 		g_free(uid_seed);
-		group = g_strdup_printf("namespace: %s, name: , uid: %s",
-								FTRACE_NAMESPACE, trace_uid);
+		group = g_strdup_printf("namespace: %s, name: %s, uid: %s",
+								options.trace_name ? options.trace_name : "",
+								options.config.lttng_format ? LTTNG_NAMESPACE :
+															  FTRACE_NAMESPACE,
+								trace_uid);
 		bt_value *response = bt_value_map_create();
 		bt_value_map_insert_real_entry(response, "weight", 1);
 		bt_value_map_insert_string_entry(response, "group", group);
@@ -163,7 +168,8 @@ ftrace_live_query_trace_infos(const bt_value *params, const bt_value **result)
 	g_free(uid_seed);
 
 	const struct ftrace_trace_identity identity = {
-		.namespace = FTRACE_NAMESPACE,
+		.namespace = options.config.lttng_format ? LTTNG_NAMESPACE :
+												   FTRACE_NAMESPACE,
 		.name = options.trace_name ? options.trace_name : "",
 		.uid = trace_uid,
 	};

@@ -528,7 +528,9 @@ create_metadata_and_ports(bt_self_component_source *self_component_source,
 		bt_trace_set_uid(live->trace, live->trace_uid);
 #endif
 #if HAS_BT2_TRACE_NAMESPACE
-		bt_trace_set_namespace(live->trace, FTRACE_NAMESPACE);
+		bt_trace_set_namespace(live->trace, live->options.config.lttng_format ?
+												LTTNG_NAMESPACE :
+												FTRACE_NAMESPACE);
 #endif
 	}
 	ftrace_set_trace_environment(
