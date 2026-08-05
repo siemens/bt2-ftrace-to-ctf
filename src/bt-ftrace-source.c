@@ -277,7 +277,8 @@ static void create_metadata_and_trace(bt_self_component *self_component,
 #endif
 	}
 	ftrace_in->trace_identity = (struct ftrace_trace_identity){
-		.namespace = FTRACE_NAMESPACE,
+		.namespace = ftrace_in->options.config.lttng_format ? LTTNG_NAMESPACE :
+															  FTRACE_NAMESPACE,
 		.name = ftrace_in->options.trace_name ? ftrace_in->options.trace_name :
 												"",
 		.uid = trace_uid,
