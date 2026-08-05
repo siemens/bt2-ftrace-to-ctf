@@ -26,6 +26,7 @@ ftrace_query_support_info(bt_self_component_class_source *self_component_class,
 						  const bt_value *params, void *method_data,
 						  const bt_value **result)
 {
+	struct ftrace_common_options options = { 0 };
 	const bt_value *type_val =
 		bt_value_map_borrow_entry_value_const(params, "type");
 	const bt_value *name_val =
@@ -36,12 +37,27 @@ ftrace_query_support_info(bt_self_component_class_source *self_component_class,
 	if (strcmp(bt_value_string_get(type_val), "file") != 0) {
 		goto nothing_discovered;
 	}
+	ftrace_parse_common_params(params, &options);
 	struct tracecmd_input *tc_in = tracecmd_open_head(
 		bt_value_string_get(name_val), TRACECMD_FL_LOAD_NO_PLUGINS);
 	if (!tc_in)
 		goto nothing_discovered;
+
+	const unsigned long long traceid = tracecmd_get_traceid(tc_in);
+	char trace_uid[UUID_STR_LEN];
+	ftrace_derive_trace_uid(traceid, trace_uid);
 	tracecmd_close(tc_in);
-	*result = bt_value_real_create_init(1);
+
+	char *group = g_strdup_printf(
+		"namespace: %s, name: %s, uid: %s",
+		options.trace_name ? options.trace_name : "",
+		options.config.lttng_format ? LTTNG_NAMESPACE : FTRACE_NAMESPACE,
+		trace_uid);
+	bt_value *response = bt_value_map_create();
+	bt_value_map_insert_real_entry(response, "weight", 1);
+	bt_value_map_insert_string_entry(response, "group", group);
+	g_free(group);
+	*result = response;
 	return BT_COMPONENT_CLASS_QUERY_METHOD_STATUS_OK;
 
 nothing_discovered:
@@ -147,7 +163,8 @@ ftrace_query_trace_infos(bt_self_component_class_source *self_component_class,
 	ftrace_derive_trace_uid(traceid, trace_uid);
 	ftrace_parse_common_params(params, &options);
 	const struct ftrace_trace_identity identity = {
-		.namespace = FTRACE_NAMESPACE,
+		.namespace = options.config.lttng_format ? LTTNG_NAMESPACE :
+												   FTRACE_NAMESPACE,
 		.name = options.trace_name ? options.trace_name : "",
 		.uid = trace_uid,
 	};
