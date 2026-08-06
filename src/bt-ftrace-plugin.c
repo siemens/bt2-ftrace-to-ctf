@@ -26,6 +26,7 @@ BT_PLUGIN(ftrace);
 BT_PLUGIN_AUTHOR("Felix Moessbauer <felix.moessbauer@siemens.com>");
 BT_PLUGIN_DESCRIPTION("Process kernel ftrace traces");
 BT_PLUGIN_LICENSE("LGPL-2.1-or-later");
+BT_PLUGIN_VERSION(FT_VERSION_MAJOR, FT_VERSION_MINOR, FT_VERSION_PATCH, NULL);
 
 /* Define the `tracedat` source component class */
 BT_PLUGIN_SOURCE_COMPONENT_CLASS(tracedat, ftrace_in_message_iterator_next);
