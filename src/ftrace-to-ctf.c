@@ -110,6 +110,11 @@ static void clear_opts(prog_opts *opts)
 	memset(opts, 0, sizeof(*opts));
 }
 
+/*
+ * Parses command-line arguments and populates the prog_opts structure.
+ * Returns 0 on success, >0 on error, and <0 on help/version display.
+ * In any case, the caller is responsible for clearing the opts.
+ */
 int parse_args(int argc, char *argv[], prog_opts *opts)
 {
 	/* Long-only option identifiers (outside the ASCII range). */
@@ -197,14 +202,14 @@ int parse_args(int argc, char *argv[], prog_opts *opts)
 			opts->loglevel = opts->loglevel > 0 ? opts->loglevel - 1 : 0;
 			break;
 		case 'h': /* fall‑through */
+			print_usage(argv[0]);
+			return -1;
 		case '?': /* unknown option */
 			print_usage(argv[0]);
-			clear_opts(opts);
 			return 1;
 
 		default:
 			/* Should never happen */
-			clear_opts(opts);
 			return 1;
 		}
 	}
@@ -216,7 +221,6 @@ int parse_args(int argc, char *argv[], prog_opts *opts)
 				"Error: expected two or three positional arguments, got %d.\n",
 				positional_left);
 		print_usage(argv[0]);
-		clear_opts(opts);
 		return 1;
 	}
 
@@ -235,7 +239,6 @@ int parse_args(int argc, char *argv[], prog_opts *opts)
 				"Allowed values are: 1, 1.8, 2.\n",
 				opts->ctf_version);
 		print_usage(argv[0]);
-		clear_opts(opts);
 		return 1;
 	}
 	if (strcmp(opts->ctf_version, "1.8") == 0 && opts->callstack) {
@@ -245,12 +248,10 @@ int parse_args(int argc, char *argv[], prog_opts *opts)
 	}
 	if (access(opts->trace_path, R_OK) != 0) {
 		perror("cannot read trace file");
-		clear_opts(opts);
 		return 1;
 	}
 	if (access(opts->out_dir, W_OK) != 0) {
 		perror("cannot write to output directory");
-		clear_opts(opts);
 		return 1;
 	}
 
@@ -503,9 +504,12 @@ int main(int argc, char **argv)
 
 	prog_opts opts;
 
-	if (parse_args(argc, argv, &opts) != 0) {
+	const int ret = parse_args(argc, argv, &opts);
+	if (ret != 0) {
 		clear_opts(&opts);
-		return -1;
+		if (ret < 0)
+			return 0;
+		return ret;
 	}
 
 	printf("Options parsed:\n");
