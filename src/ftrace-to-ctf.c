@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <uuid.h>
 
+#include "config.h"
 #include "ftrace-to-ctf-discovery.h"
 
 /* Structure that holds the parsed options */
@@ -70,8 +71,37 @@ static void print_usage(char *prog_name)
 		"      --clock-namespace <ns> Trace clock namespace (CTF 2 only)\n"
 		"      --clock-name <name> Trace clock name (CTF 2 only)\n"
 		"  -v, --verbose         Increase logging level (repeatable)\n"
+		"      --version         Show version information and exit\n"
 		"  -h, --help            Show this help message and exit\n",
 		basename(prog_name));
+}
+
+const bt_plugin *load_plugin_by_name(char *name);
+static void print_versions(void)
+{
+	unsigned p_major, p_minor, p_patch;
+	const bt_plugin *plugin = NULL;
+
+	printf("ftrace-to-ctf:\t%d.%d.%d\n", FT_VERSION_MAJOR, FT_VERSION_MINOR,
+		   FT_VERSION_PATCH);
+
+	p_major = bt_version_get_major();
+	p_minor = bt_version_get_minor();
+	p_patch = bt_version_get_patch();
+	printf("babeltrace2:\t%d.%d.%d\n", p_major, p_minor, p_patch);
+
+	plugin = load_plugin_by_name("ftrace");
+	if (plugin) {
+		bt_plugin_get_version(plugin, &p_major, &p_minor, &p_patch, NULL);
+		printf("plugin ftrace:\t%d.%d.%d\n", p_major, p_minor, p_patch);
+		BT_PLUGIN_PUT_REF_AND_RESET(plugin);
+	}
+	plugin = load_plugin_by_name("ctf");
+	if (plugin) {
+		bt_plugin_get_version(plugin, &p_major, &p_minor, &p_patch, NULL);
+		printf("plugin ctf:\t%d.%d.%d\n", p_major, p_minor, p_patch);
+		BT_PLUGIN_PUT_REF_AND_RESET(plugin);
+	}
 }
 
 /* 
@@ -121,6 +151,7 @@ int parse_args(int argc, char *argv[], prog_opts *opts)
 	enum {
 		OPT_CLOCK_NAMESPACE = 256,
 		OPT_CLOCK_NAME,
+		OPT_VERSION,
 	};
 
 	/* Initialise defaults */
@@ -143,6 +174,7 @@ int parse_args(int argc, char *argv[], prog_opts *opts)
 		{ "trace-dt",    required_argument, 0, 'd' },
 		{ "trace-name",  required_argument, 0, 'n' },
 		{ "verbose",     no_argument,       0, 'v' },
+		{ "version",     no_argument,       0, OPT_VERSION },
 		{ "help",        no_argument,       0, 'h' },
 		{ 0,             0,                 0,  0  }
 	};
@@ -201,6 +233,9 @@ int parse_args(int argc, char *argv[], prog_opts *opts)
 		case 'v':
 			opts->loglevel = opts->loglevel > 0 ? opts->loglevel - 1 : 0;
 			break;
+		case OPT_VERSION:
+			print_versions();
+			return -1;
 		case 'h': /* fall‑through */
 			print_usage(argv[0]);
 			return -1;
