@@ -9,8 +9,6 @@ This repository contains two components:
 - a Babeltrace2 plugin to read trace-cmd's trace.dat file
 - a program to convert the trace.dat into an LTTng (alike) kernel trace in CTF format
 
-*Note*: The project is still in a very early state. Expect things to break!
-
 ## Babeltrace2 Plugin (ftrace)
 
 The plugin provides three components:
