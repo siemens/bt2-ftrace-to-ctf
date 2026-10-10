@@ -59,10 +59,6 @@
 #include <trace-cmd.h>
 #include <uuid.h>
 
-#define USE_PACKAGES 1
-/* currently an arbitrary number, but helps to test the next package code path */
-#define MAX_EVENTS_PER_PACKET 1024
-
 /* ports private data */
 struct port_in {
 	int cpu_id;
@@ -355,9 +351,8 @@ setup_ports_for_trace_buffer(struct ftrace_in *ftrace_in,
 	 */
 	const struct ftrace_common_config config = get_common_config(ftrace_in);
 	tc_buffer->stream_class = ftrace_create_stream_class(
-		ftrace_in->trace_class, ftrace_in->clock_class, USE_PACKAGES,
-		buffer_index, ftrace_in->trace_uid,
-		ftrace_in->options.config.lttng_format);
+		ftrace_in->trace_class, ftrace_in->clock_class, true, buffer_index,
+		ftrace_in->trace_uid, ftrace_in->options.config.lttng_format);
 	if (buffer_name)
 		bt_stream_class_set_name(tc_buffer->stream_class, buffer_name);
 	tc_buffer->event_classes =
@@ -545,7 +540,6 @@ struct ftrace_in_message_iterator {
 
 	/* current packet instance */
 	bt_packet *packet;
-	uint64_t events_in_pkg;
 	/* we need to report n discarded events*/
 	long long events_discarded;
 
@@ -592,7 +586,6 @@ ftrace_in_message_iterator_initialize(
 
 	/* Set the message iterator's initial state */
 	ftrace_in_iter->state = FTRACE_IN_MESSAGE_ITERATOR_STATE_STREAM_BEGINNING;
-	ftrace_in_iter->events_in_pkg = 0;
 	ftrace_in_iter->events_discarded = 0;
 
 	/* the iterator supports seeking */
@@ -660,8 +653,7 @@ create_message_from_event(struct ftrace_in_message_iterator *ftrace_in_iter,
 
 	/* close packet */
 	if (supports_packets && ftrace_in_iter->packet &&
-		(!rec || ftrace_in_iter->events_discarded ||
-		 ftrace_in_iter->events_in_pkg > MAX_EVENTS_PER_PACKET)) {
+		(!rec || ftrace_in_iter->events_discarded)) {
 		message = bt_message_packet_end_create_with_default_clock_snapshot(
 			self_message_iterator, ftrace_in_iter->packet,
 			ftrace_in_iter->last_rec_ts);
@@ -684,7 +676,6 @@ create_message_from_event(struct ftrace_in_message_iterator *ftrace_in_iter,
 				message, ftrace_in_iter->events_discarded);
 		}
 		ftrace_in_iter->events_discarded = 0;
-		ftrace_in_iter->events_in_pkg++;
 		return message;
 	}
 
@@ -697,7 +688,6 @@ create_message_from_event(struct ftrace_in_message_iterator *ftrace_in_iter,
 		bt_field_integer_unsigned_set_value(cpu_id_f, (unsigned)rec->cpu);
 
 		ftrace_in_iter->packet = packet;
-		ftrace_in_iter->events_in_pkg = 0;
 		message =
 			bt_message_packet_beginning_create_with_default_clock_snapshot(
 				self_message_iterator, packet, rec->ts);
@@ -759,8 +749,6 @@ create_message_from_event(struct ftrace_in_message_iterator *ftrace_in_iter,
 								 rec, fields[j], payload_field);
 	}
 	free(fields);
-
-	ftrace_in_iter->events_in_pkg++;
 
 next_record:
 	/*
@@ -837,7 +825,6 @@ ftrace_in_message_iterator_seek_beginning(
 	ftrace_in_iter->rec = tracecmd_read_cpu_first(
 		ftrace_in_iter->port_data->tc_input, ftrace_in_iter->port_data->cpu_id);
 
-	ftrace_in_iter->events_in_pkg = 0;
 	ftrace_in_iter->events_discarded = 0;
 	ftrace_in_iter->last_rec_ts = 0;
 	ftrace_in_iter->state = FTRACE_IN_MESSAGE_ITERATOR_STATE_STREAM_BEGINNING;
