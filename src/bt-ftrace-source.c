@@ -538,6 +538,11 @@ struct ftrace_in_message_iterator {
 
 	/* current packet instance */
 	bt_packet *packet;
+	/* whether the current packet needs to be closed */
+	bt_bool packet_close_pending;
+	/* current packet is the zero-length packet ending a discarded range */
+	bt_bool in_gap_packet;
+	unsigned long long gap_packet_ts;
 	/* we need to report n discarded events*/
 	long long events_discarded;
 
@@ -585,6 +590,8 @@ ftrace_in_message_iterator_initialize(
 	/* Set the message iterator's initial state */
 	ftrace_in_iter->state = FTRACE_IN_MESSAGE_ITERATOR_STATE_STREAM_BEGINNING;
 	ftrace_in_iter->events_discarded = 0;
+	ftrace_in_iter->packet_close_pending = false;
+	ftrace_in_iter->in_gap_packet = false;
 
 	/* the iterator supports seeking */
 	bt_self_message_iterator_configuration_set_can_seek_forward(configuration,
@@ -651,11 +658,14 @@ create_message_from_event(struct ftrace_in_message_iterator *ftrace_in_iter,
 
 	/* close packet */
 	if (supports_packets && ftrace_in_iter->packet &&
-		(!rec || ftrace_in_iter->events_discarded)) {
+		(!rec || ftrace_in_iter->packet_close_pending)) {
 		message = bt_message_packet_end_create_with_default_clock_snapshot(
 			self_message_iterator, ftrace_in_iter->packet,
-			ftrace_in_iter->last_rec_ts);
+			ftrace_in_iter->in_gap_packet ? ftrace_in_iter->gap_packet_ts :
+											ftrace_in_iter->last_rec_ts);
 		BT_PACKET_PUT_REF_AND_RESET(ftrace_in_iter->packet);
+		ftrace_in_iter->packet_close_pending = false;
+		ftrace_in_iter->in_gap_packet = false;
 		return message;
 	}
 
@@ -664,7 +674,7 @@ create_message_from_event(struct ftrace_in_message_iterator *ftrace_in_iter,
 	}
 
 	/* discarded events packages may only be emitted between packets */
-	if (ftrace_in_iter->events_discarded) {
+	if (supports_discarded_events && ftrace_in_iter->events_discarded) {
 		message =
 			bt_message_discarded_events_create_with_default_clock_snapshots(
 				self_message_iterator, stream, ftrace_in_iter->last_rec_ts,
@@ -674,6 +684,16 @@ create_message_from_event(struct ftrace_in_message_iterator *ftrace_in_iter,
 				message, ftrace_in_iter->events_discarded);
 		}
 		ftrace_in_iter->events_discarded = 0;
+		/*
+		 * CTF stores discarded events as a per-packet counter snapshot, so
+		 * sink.ctf.fs requires the range to end at the end of the next
+		 * packet. That is only known after reading it, so close the range
+		 * with an empty packet at the discard boundary instead.
+		 */
+		if (supports_packets) {
+			ftrace_in_iter->in_gap_packet = true;
+			ftrace_in_iter->gap_packet_ts = rec->ts;
+		}
 		return message;
 	}
 
@@ -686,6 +706,8 @@ create_message_from_event(struct ftrace_in_message_iterator *ftrace_in_iter,
 		bt_field_integer_unsigned_set_value(cpu_id_f, (unsigned)rec->cpu);
 
 		ftrace_in_iter->packet = packet;
+		if (ftrace_in_iter->in_gap_packet)
+			ftrace_in_iter->packet_close_pending = true;
 		message =
 			bt_message_packet_beginning_create_with_default_clock_snapshot(
 				self_message_iterator, packet, rec->ts);
@@ -757,9 +779,23 @@ next_record:
 	tracecmd_free_record(rec);
 	ftrace_in_iter->rec = tracecmd_read_data(
 		ftrace_in_iter->port_data->tc_input, ftrace_in_iter->port_data->cpu_id);
-	if (supports_discarded_events && ftrace_in_iter->rec) {
+#if HAS_TRACECMD_RECORD_AT_BUFFER_START
+	if (ftrace_in_iter->rec &&
+		tracecmd_record_at_buffer_start(ftrace_in_iter->port_data->tc_input,
+										ftrace_in_iter->rec)) {
+		ftrace_in_iter->packet_close_pending = true;
 		ftrace_in_iter->events_discarded = ftrace_in_iter->rec->missed_events;
 	}
+#else
+	/*
+	 * split packets only when a discard occurs.
+	 * missed_events is only ever set on the first record of a sub-buffer.
+	 */
+	if (ftrace_in_iter->rec && ftrace_in_iter->rec->missed_events) {
+		ftrace_in_iter->packet_close_pending = true;
+		ftrace_in_iter->events_discarded = ftrace_in_iter->rec->missed_events;
+	}
+#endif
 	return message;
 
 done:
@@ -822,6 +858,8 @@ ftrace_in_message_iterator_seek_beginning(
 		ftrace_in_iter->port_data->tc_input, ftrace_in_iter->port_data->cpu_id);
 
 	ftrace_in_iter->events_discarded = 0;
+	ftrace_in_iter->packet_close_pending = false;
+	ftrace_in_iter->in_gap_packet = false;
 	ftrace_in_iter->last_rec_ts = 0;
 	ftrace_in_iter->state = FTRACE_IN_MESSAGE_ITERATOR_STATE_STREAM_BEGINNING;
 

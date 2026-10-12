@@ -32,6 +32,9 @@ tc_has_uname = cc.has_function('tracecmd_get_uname',
 tc_has_trace_clock = cc.has_function('tracecmd_get_trace_clock',
                                      dependencies: tracecmd_dep,
                                      required: false)
+tc_has_record_at_buffer_start = cc.has_function('tracecmd_record_at_buffer_start',
+                                                dependencies: tracecmd_dep,
+                                                required: false)
 bt2_has_clock_uid = cc.has_function('bt_clock_class_set_uid',
                                     dependencies: babeltrace2_dep,
                                     required: false)
@@ -74,7 +77,8 @@ conf_data = configuration_data({
   'has_bt2_new_dynamic_field_api': bt2_has_new_dynamic_field_api.to_int(),
   'has_tracecmd_reverse_iteration': tc_has_reverse_it.to_int(),
   'has_tracecmd_uname': tc_has_uname.to_int(),
-  'has_tracecmd_trace_clock': tc_has_trace_clock.to_int()
+  'has_tracecmd_trace_clock': tc_has_trace_clock.to_int(),
+  'has_tracecmd_record_at_buffer_start': tc_has_record_at_buffer_start.to_int()
 })
 configure_file(input : 'src/config.h.in',
                output : 'config.h',
