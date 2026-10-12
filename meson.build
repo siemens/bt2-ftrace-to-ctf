@@ -25,6 +25,13 @@ babeltrace2_dep = dependency('babeltrace2')
 tc_has_reverse_it = cc.has_function('tracecmd_iterate_events_reverse',
                                     dependencies: tracecmd_dep,
                                     required: false)
+# symbols declared in trace-cmd-private.h, not part of the public ABI
+tc_has_uname = cc.has_function('tracecmd_get_uname',
+                               dependencies: tracecmd_dep,
+                               required: false)
+tc_has_trace_clock = cc.has_function('tracecmd_get_trace_clock',
+                                     dependencies: tracecmd_dep,
+                                     required: false)
 bt2_has_clock_uid = cc.has_function('bt_clock_class_set_uid',
                                     dependencies: babeltrace2_dep,
                                     required: false)
@@ -56,7 +63,6 @@ conf_data = configuration_data({
   'version_major': project_version_parts[0],
   'version_minor': project_version_parts[1],
   'version_patch': project_version_parts[2],
-  'tracecmd_private_syms': get_option('tracecmd-internals').to_int(),
   'with_live_source': get_option('with-live-source').to_int(),
   'has_bt2_clock_uid': bt2_has_clock_uid.to_int(),
   'has_bt2_clock_namespace': bt2_has_clock_namespace.to_int(),
@@ -66,7 +72,9 @@ conf_data = configuration_data({
   'has_bt2_stream_class_namespace': bt2_has_stream_class_namespace.to_int(),
   'has_bt2_stream_class_uid': bt2_has_stream_class_uid.to_int(),
   'has_bt2_new_dynamic_field_api': bt2_has_new_dynamic_field_api.to_int(),
-  'has_tracecmd_reverse_iteration': tc_has_reverse_it.to_int()
+  'has_tracecmd_reverse_iteration': tc_has_reverse_it.to_int(),
+  'has_tracecmd_uname': tc_has_uname.to_int(),
+  'has_tracecmd_trace_clock': tc_has_trace_clock.to_int()
 })
 configure_file(input : 'src/config.h.in',
                output : 'config.h',
@@ -75,7 +83,6 @@ config_inc = include_directories('.')
 
 summary(
   {
-    'private libtracecmd symbols (plugin)': get_option('tracecmd-internals'),
     'with source.ftrace.live': get_option('with-live-source'),
   },
   bool_yn: true,

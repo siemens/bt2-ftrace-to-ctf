@@ -10,8 +10,13 @@
 
 struct tracecmd_input;
 
+#if HAS_TRACECMD_UNAME
 const char *tracecmd_get_uname(struct tracecmd_input *handle);
+#endif
+
+#if HAS_TRACECMD_TRACE_CLOCK
 const char *tracecmd_get_trace_clock(struct tracecmd_input *handle);
+#endif
 
 /* _TRACE_CMD_PRIVATE_H */
 #endif

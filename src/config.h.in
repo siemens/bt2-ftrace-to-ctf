@@ -14,13 +14,12 @@
 #define LTTNG_VERSION_MAJOR 2
 #define LTTNG_VERSION_MINOR 13
 
-/* Allow usage of libtracecmd private symbols */
-#define WITH_TRACE_CMD_PRIVATE_SYMBOLS @tracecmd_private_syms@
-
 /* Enable live source reading (requires tracefs 1.8.0 or later) */
 #define WITH_LIVE_SOURCE @with_live_source@
 
 /* optional symbols */
+#define HAS_TRACECMD_UNAME @has_tracecmd_uname@
+#define HAS_TRACECMD_TRACE_CLOCK @has_tracecmd_trace_clock@
 #define HAS_BT2_CLOCK_UID @has_bt2_clock_uid@
 #define HAS_BT2_CLOCK_NAMESPACE @has_bt2_clock_namespace@
 #define HAS_BT2_CLOCK_UNKNOWN @has_bt2_clock_unknown@
