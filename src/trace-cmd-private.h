@@ -9,6 +9,7 @@
 #define _TRACE_CMD_PRIVATE_H
 
 struct tracecmd_input;
+struct tep_record;
 
 #if HAS_TRACECMD_UNAME
 const char *tracecmd_get_uname(struct tracecmd_input *handle);
@@ -16,6 +17,11 @@ const char *tracecmd_get_uname(struct tracecmd_input *handle);
 
 #if HAS_TRACECMD_TRACE_CLOCK
 const char *tracecmd_get_trace_clock(struct tracecmd_input *handle);
+#endif
+
+#if HAS_TRACECMD_RECORD_AT_BUFFER_START
+int tracecmd_record_at_buffer_start(struct tracecmd_input *handle,
+									struct tep_record *record);
 #endif
 
 /* _TRACE_CMD_PRIVATE_H */
