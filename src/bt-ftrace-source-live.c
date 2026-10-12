@@ -61,6 +61,9 @@ struct ftrace_live_iterator {
 	bool trace_flushed;
 	bt_packet *packet;
 	bool packet_end_pending;
+	/* current packet is the zero-length packet ending a discarded range */
+	bool in_gap_packet;
+	uint64_t gap_packet_ts;
 	long long events_discarded;
 	uint64_t last_record_ts;
 	struct ftrace_pending_stack pending_stack;
@@ -102,9 +105,12 @@ create_live_message(struct ftrace_live_iterator *iterator,
 		(iterator->events_discarded || iterator->packet_end_pending ||
 		 iterator->state == FTRACE_LIVE_ITERATOR_STATE_STREAM_ENDING)) {
 		message = bt_message_packet_end_create_with_default_clock_snapshot(
-			self_message_iterator, iterator->packet, iterator->last_record_ts);
+			self_message_iterator, iterator->packet,
+			iterator->in_gap_packet ? iterator->gap_packet_ts :
+									  iterator->last_record_ts);
 		BT_PACKET_PUT_REF_AND_RESET(iterator->packet);
 		iterator->packet_end_pending = false;
+		iterator->in_gap_packet = false;
 		return message;
 	}
 	if (iterator->state == FTRACE_LIVE_ITERATOR_STATE_STREAM_ENDING) {
@@ -122,6 +128,14 @@ create_live_message(struct ftrace_live_iterator *iterator,
 			bt_message_discarded_events_set_count(message,
 												  iterator->events_discarded);
 		iterator->events_discarded = 0;
+		/*
+		 * CTF stores discarded events as a per-packet counter snapshot, so
+		 * sink.ctf.fs requires the range to end at the end of the next
+		 * packet. That is only known after reading it, so close the range
+		 * with an empty packet at the discard boundary instead.
+		 */
+		iterator->in_gap_packet = true;
+		iterator->gap_packet_ts = iterator->record.ts;
 		return message;
 	}
 	if (!iterator->packet) {
@@ -133,6 +147,8 @@ create_live_message(struct ftrace_live_iterator *iterator,
 		cpu_id =
 			bt_field_structure_borrow_member_field_by_name(context, "cpu_id");
 		bt_field_integer_unsigned_set_value(cpu_id, iterator->port->cpu_id);
+		if (iterator->in_gap_packet)
+			iterator->packet_end_pending = true;
 		return bt_message_packet_beginning_create_with_default_clock_snapshot(
 			self_message_iterator, iterator->packet, iterator->record.ts);
 	}
