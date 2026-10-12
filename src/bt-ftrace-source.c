@@ -695,10 +695,8 @@ create_message_from_event(struct ftrace_in_message_iterator *ftrace_in_iter,
 	struct tep_handle *tep =
 		tracecmd_get_tep(ftrace_in_iter->port_data->tc_input);
 	trace_event = tep_find_event_by_record(tep, rec);
-	if (!trace_event) {
-		/* TODO: skip */
-		BT_FTRACE_LOG_ERROR(ftrace_in_iter->ftrace_in->log_level,
-							"unknown event");
+	if (trace_event == NULL) {
+		/* There is no event from given record */
 		goto done;
 	}
 
