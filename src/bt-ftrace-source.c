@@ -43,9 +43,7 @@
 #include "bt-ftrace-source.h"
 #include "bt-ftrace-sym-field.h"
 #include "bt-ftrace-utils.h"
-#if WITH_TRACE_CMD_PRIVATE_SYMBOLS
 #include "trace-cmd-private.h"
-#endif
 
 #include <babeltrace2/babeltrace.h>
 #include <event-parse.h>
@@ -160,7 +158,7 @@ static char *ftrace_live_trace_creation_datetime_from_file(const char *path)
  */
 static void parse_tracedat_opts(struct ftrace_in *ftrace_in)
 {
-#if WITH_TRACE_CMD_PRIVATE_SYMBOLS
+#if HAS_TRACECMD_UNAME
 	const char *uname = tracecmd_get_uname(ftrace_in->tc_buffers[0].tc_input);
 	char *uname_copy = strdup(uname);
 	char *saveptr = NULL;
@@ -194,7 +192,7 @@ static void create_metadata_and_trace(bt_self_component *self_component,
 
 	struct tracecmd_input *tc_main = ftrace_in->tc_buffers[0].tc_input;
 
-#if WITH_TRACE_CMD_PRIVATE_SYMBOLS
+#if HAS_TRACECMD_TRACE_CLOCK
 	const char *traceclock = tracecmd_get_trace_clock(tc_main);
 #else
 	/* assume monotonic clock if not provided otherwise */
