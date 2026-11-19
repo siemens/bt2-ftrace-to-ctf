@@ -398,6 +398,9 @@ void ftrace_set_trace_environment(
 	bt_trace_set_environment_entry_integer(
 		trace, "tracer_minor",
 		config->lttng_format ? LTTNG_VERSION_MINOR : tracer_version_minor);
+	if (config->lttng_format)
+		bt_trace_set_environment_entry_string(trace, "converted_from",
+											  "ftrace");
 	if (hostname)
 		bt_trace_set_environment_entry_string(trace, "hostname", hostname);
 	if (trace_creation_datetime)
