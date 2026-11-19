@@ -8,6 +8,7 @@
 
 #include <babeltrace2/babeltrace.h>
 #include <event-parse.h>
+#include <stdbool.h>
 
 /**
  * LTTng events are named after their lttng kernel tracepoints, but we have
@@ -22,6 +23,15 @@ const char *lttng_get_event_name_from_event(const struct tep_event *event);
  */
 const char *lttng_get_field_name_from_event(const struct tep_event *event,
 											const char *field_name);
+
+/**
+ * LTTng records syscall arguments with their kernel types, while ftrace
+ * stores each as an unsigned long. Get the width and signedness for the
+ * argument's type; false if it is a pointer or an unknown type.
+ */
+bool lttng_get_syscall_arg_type(const struct tep_event *event,
+								const struct tep_format_field *field,
+								unsigned int *bits, bool *is_signed);
 
 /**
  * Some event values are different on LTTng and the kernel trace. Examples are

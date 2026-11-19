@@ -98,6 +98,89 @@ const char *lttng_get_field_name_from_event(const struct tep_event *event,
 	return lttng_field_name_replace_pid_by_tid(field_name);
 }
 
+struct syscall_arg_type {
+	const char *name;
+	unsigned int bits;
+	bool is_signed;
+};
+
+/* Width of the traced kernel's long, i.e. of the field storing the argument. */
+#define SYSCALL_ARG_LONG_BITS 0
+
+/*
+ * Kernel types of syscall arguments, resolved through
+ * include/linux/types.h, include/uapi/asm-generic/posix_types.h,
+ * include/uapi/linux/posix_types.h, include/uapi/asm-generic/int-ll64.h,
+ * include/linux/key.h, include/linux/quota.h, include/linux/fs.h and
+ * include/uapi/linux/aio_abi.h.
+ */
+static const struct syscall_arg_type syscall_arg_types[] = {
+	{ "int", 32, true },
+	{ "pid_t", 32, true },
+	{ "clockid_t", 32, true },
+	{ "timer_t", 32, true },
+	{ "mqd_t", 32, true },
+	{ "key_t", 32, true },
+	{ "key_serial_t", 32, true },
+	{ "rwf_t", 32, true },
+	{ "__s32", 32, true },
+	{ "unsigned int", 32, false },
+	{ "unsigned", 32, false },
+	{ "u32", 32, false },
+	{ "__u32", 32, false },
+	{ "uid_t", 32, false },
+	{ "gid_t", 32, false },
+	{ "qid_t", 32, false },
+	{ "umode_t", 16, false },
+	{ "long", SYSCALL_ARG_LONG_BITS, true },
+	{ "off_t", SYSCALL_ARG_LONG_BITS, true },
+	{ "unsigned long", SYSCALL_ARG_LONG_BITS, false },
+	{ "size_t", SYSCALL_ARG_LONG_BITS, false },
+	{ "aio_context_t", SYSCALL_ARG_LONG_BITS, false },
+	{ "loff_t", 64, true },
+	{ "u64", 64, false },
+	{ "__u64", 64, false },
+};
+
+bool lttng_get_syscall_arg_type(const struct tep_event *event,
+								const struct tep_format_field *field,
+								unsigned int *bits, bool *is_signed)
+{
+	static const char const_prefix[] = "const ";
+	static const char const_suffix[] = " const";
+	const size_t prefix_len = sizeof(const_prefix) - 1;
+	const size_t suffix_len = sizeof(const_suffix) - 1;
+	const char *type = field->type;
+	size_t len;
+
+	if (!event_system_is("syscalls", event) || !type ||
+		(field->flags &
+		 (TEP_FIELD_IS_POINTER | TEP_FIELD_IS_ARRAY | TEP_FIELD_IS_STRING)) ||
+		strchr(type, '*'))
+		return false;
+	if (strncmp(type, const_prefix, prefix_len) == 0)
+		type += prefix_len;
+	len = strlen(type);
+	if (len > suffix_len && strcmp(type + len - suffix_len, const_suffix) == 0)
+		len -= suffix_len;
+	for (size_t i = 0;
+		 i < sizeof(syscall_arg_types) / sizeof(syscall_arg_types[0]); i++) {
+		if (strlen(syscall_arg_types[i].name) == len &&
+			strncmp(type, syscall_arg_types[i].name, len) == 0) {
+			const unsigned int field_bits = field->size * 8;
+			const unsigned int arg_bits = syscall_arg_types[i].bits;
+
+			/* ftrace stores no more of an argument than a long. */
+			*bits = arg_bits == SYSCALL_ARG_LONG_BITS || arg_bits > field_bits ?
+						field_bits :
+						arg_bits;
+			*is_signed = syscall_arg_types[i].is_signed;
+			return true;
+		}
+	}
+	return false;
+}
+
 uint64_t lttng_get_field_val_from_event_unsigned(const struct tep_event *event,
 												 const char *field_name,
 												 uint64_t val)
