@@ -127,6 +127,7 @@ get_common_config(const struct ftrace_in *ftrace_in)
 		.lttng_format = ftrace_in->options.config.lttng_format,
 		.symbolize_funcs = ftrace_in->options.config.symbolize_funcs,
 		.with_callstacks = ftrace_in->options.config.with_callstacks,
+		.arch = ftrace_in->options.config.arch,
 		.log_level = ftrace_in->log_level,
 		.mip_version = ftrace_in->mip_version,
 	};
@@ -170,9 +171,12 @@ static void parse_tracedat_opts(struct ftrace_in *ftrace_in)
 	ftrace_in->trace_hostname = tok ? strdup(tok) : NULL;
 	tok = tok ? strtok_r(NULL, " ", &saveptr) : NULL;
 	ftrace_in->trace_kernel_release = tok ? strdup(tok) : NULL;
+	tok = tok ? strtok_r(NULL, " ", &saveptr) : NULL;
+	ftrace_in->options.config.arch = ftrace_arch_from_machine(tok);
 	free(uname_copy);
 #else
 	ftrace_in->trace_sysname = strdup("Linux");
+	ftrace_in->options.config.arch = FTRACE_ARCH_UNKNOWN;
 #endif
 }
 

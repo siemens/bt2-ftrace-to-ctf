@@ -9,6 +9,7 @@
 #include "bt-ftrace-source-live.h"
 #include "bt-ftrace-common.h"
 #include "bt-ftrace-logging.h"
+#include "bt-ftrace-lttng-events.h"
 
 #include <glib.h>
 #include <stdio.h>
@@ -607,6 +608,8 @@ ftrace_live_initialize(bt_self_component_source *self_component_source,
 	}
 	path = bt_value_string_get(path_value);
 	ftrace_parse_common_params(params, &live->options);
+	live->options.config.arch =
+		ftrace_arch_from_machine(live->system_info.machine);
 	if (!ftrace_live_set_creation_datetime(live))
 		BT_FTRACE_LOG_WARNING(live->log_level,
 							  "cannot create trace creation datetime");

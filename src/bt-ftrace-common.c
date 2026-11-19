@@ -230,7 +230,7 @@ ftrace_create_event_class(bt_stream_class *stream_class,
 	struct tep_format_field **fields;
 	if (config->lttng_format)
 		snprintf(name, sizeof(name), "%s",
-				 lttng_get_event_name_from_event(event));
+				 lttng_get_event_name_from_event(event, config->arch));
 	else
 		snprintf(name, sizeof(name), "%s:%s", event->system, event->name);
 	bt_event_class_set_name(event_class, name);
