@@ -61,8 +61,11 @@ const char *event_syscall_prefix_name(const struct tep_event *event)
 	return outbuf;
 }
 
-const char *lttng_get_event_name_from_event(const struct tep_event *event)
+const char *lttng_get_event_name_from_event(const struct tep_event *event,
+											enum ftrace_arch arch)
 {
+	const bool arch_x86 = (arch == FTRACE_ARCH_X86);
+
 	if (event_system_is("irq", event) && !event_has_prefix("irq_", event)) {
 		return event_prefix_name("irq_", event);
 	} else if (event_system_is("timer", event) &&
@@ -74,6 +77,10 @@ const char *lttng_get_event_name_from_event(const struct tep_event *event)
 	} else if (event_system_is("console", event) &&
 			   !event_has_prefix("console_", event)) {
 		return event_prefix_name("console_", event);
+	} else if (arch_x86 && event_system_is("irq_vectors", event)) {
+		return event_prefix_name("x86_irq_vectors_", event);
+	} else if (arch_x86 && event_system_is("exceptions", event)) {
+		return event_prefix_name("x86_exceptions_", event);
 	} else if (event_system_is("syscalls", event) ||
 			   event_system_is("raw_syscalls", event)) {
 		return event_syscall_prefix_name(event);

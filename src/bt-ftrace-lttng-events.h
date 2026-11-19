@@ -10,12 +10,16 @@
 #include <event-parse.h>
 #include <stdbool.h>
 
+#include "bt-ftrace-utils.h"
+
 /**
  * LTTng events are named after their lttng kernel tracepoints, but we have
  * names from the kernels tracefs. Map them for well-known events. Usually,
- * that is just the event name without the event system.
+ * that is just the event name without the event system. LTTng names some
+ * events after the architecture of the traced machine.
  */
-const char *lttng_get_event_name_from_event(const struct tep_event *event);
+const char *lttng_get_event_name_from_event(const struct tep_event *event,
+											enum ftrace_arch arch);
 
 /**
  * Some event fields are named differently in LTTng. Examples are pid / tid,

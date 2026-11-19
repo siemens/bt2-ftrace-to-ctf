@@ -7,7 +7,31 @@
 #define _BT_FTRACE_UTILS_H
 
 #include <stdbool.h>
+#include <string.h>
 #include <event-parse.h>
+
+/**
+ * Architecture of the traced machine
+ */
+enum ftrace_arch {
+	FTRACE_ARCH_UNKNOWN = 0,
+	FTRACE_ARCH_X86,
+	FTRACE_ARCH_OTHER,
+};
+
+/**
+ * Returns the architecture of machine, as in uname -m. NULL is unknown.
+ */
+static inline enum ftrace_arch ftrace_arch_from_machine(const char *machine)
+{
+	if (!machine)
+		return FTRACE_ARCH_UNKNOWN;
+	if (strcmp(machine, "x86_64") == 0 ||
+		(strlen(machine) == 4 && machine[0] == 'i' &&
+		 strcmp(machine + 2, "86") == 0))
+		return FTRACE_ARCH_X86;
+	return FTRACE_ARCH_OTHER;
+}
 
 /**
  * Returns 1 if the event has the given prefix, 0 otherwise

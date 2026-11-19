@@ -11,6 +11,8 @@
 #include <glib.h>
 #include <uuid.h>
 
+#include "bt-ftrace-utils.h"
+
 #define FTRACE_CLOCK_UUID_NAMESPACE                     \
 	{                                                   \
 		0xfc, 0xc2, 0xb9, 0xca, 0x5f, 0x9d, 0x4e, 0x51, \
@@ -36,6 +38,8 @@ struct ftrace_common_config {
 	bt_bool lttng_format;
 	bt_bool symbolize_funcs;
 	bt_bool with_callstacks;
+	/* architecture of the traced machine */
+	enum ftrace_arch arch;
 	bt_logging_level log_level;
 	uint64_t mip_version;
 };
