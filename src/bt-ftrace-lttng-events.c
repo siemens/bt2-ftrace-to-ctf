@@ -92,6 +92,9 @@ const char *lttng_get_field_name_from_event(const struct tep_event *event,
 		return "_callstack_kernel";
 	if (strcmp(field_name, "user_stack") == 0)
 		return "_callstack_user";
+	/* LTTng keeps the kernel's names of syscall arguments. */
+	if (event_system_is("syscalls", event))
+		return field_name;
 	return lttng_field_name_replace_pid_by_tid(field_name);
 }
 
