@@ -102,7 +102,19 @@ create_event_field_class(bt_trace_class *trace_class,
 	const unsigned long flags = field->flags;
 	bt_field_class *field_class = NULL;
 	int field_size = field->size;
+	unsigned int syscall_arg_bits;
+	bool syscall_arg_signed;
 
+	if (config->lttng_format &&
+		lttng_get_syscall_arg_type(field->event, field, &syscall_arg_bits,
+								   &syscall_arg_signed)) {
+		field_class = syscall_arg_signed ?
+						  bt_field_class_integer_signed_create(trace_class) :
+						  bt_field_class_integer_unsigned_create(trace_class);
+		bt_field_class_integer_set_field_value_range(field_class,
+													 syscall_arg_bits);
+		return field_class;
+	}
 	if (flags & TEP_FIELD_IS_ARRAY && field->arraylen)
 		field_size /= field->arraylen;
 	if (flags & TEP_FIELD_IS_STRING) {
@@ -444,10 +456,18 @@ void ftrace_clear_pending_stack(struct ftrace_pending_stack *pending_stack)
 	pending_stack->ulen = 0;
 }
 
+static uint64_t truncate_to_bits(uint64_t val, uint64_t bits)
+{
+	return bits < 64 ? val & ((UINT64_C(1) << bits) - 1) : val;
+}
+
 static int64_t convert_to_signed(uint64_t val, uint64_t bits)
 {
+	if (bits >= 64)
+		return (int64_t)val;
 	const uint64_t sign_bit = UINT64_C(1) << (bits - 1);
 	const uint64_t full_range = UINT64_C(1) << bits;
+	val = truncate_to_bits(val, bits);
 	return val & sign_bit ? (int64_t)(val - full_range) : (int64_t)val;
 }
 
@@ -471,7 +491,9 @@ static void set_field_value(const struct ftrace_common_config *config,
 		bt_field_integer_signed_set_value(data_field, val);
 	} else if (bt_field_class_type_is(data_class_type,
 									  BT_FIELD_CLASS_TYPE_UNSIGNED_INTEGER)) {
-		uint64_t val = tep_read_number(field->event->tep, data, len);
+		uint64_t val = truncate_to_bits(
+			tep_read_number(field->event->tep, data, len),
+			bt_field_class_integer_get_field_value_range(data_class));
 		if (config->lttng_format)
 			val = lttng_get_field_val_from_event_unsigned(field->event,
 														  field_name, val);
